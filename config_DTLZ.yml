@@ -1,0 +1,39 @@
+# DTLZ configs:
+## problem setup:
+x_dim: 10
+y_dim: 3
+x_upperbound: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+x_lowerbound: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+## Kriging model setup:
+n_levels: 10
+coe_range: [0.00001, 10.]
+exp_range: [1., 2.]
+model_training_evaluation_init: 3000
+model_training_evaluation: 1000
+model_training_population_size: 100
+model_training_neighborhood_size: 10
+#(To set PSO parameters, see optimization/PSO.py)
+
+# SAEA configs:
+## evaluations:
+evaluation_init: 109
+evaluation_max: 115
+## generation-based reproduction:
+search_evaluation_max: 3000
+population_size: 100
+neighborhood_size: 10
+## individual-based reproduction:
+n_variants: 100
+
+crossover_op: 'SBX'
+crossover_args: [1.0, 20] # probability, distribution_index
+mutation_op: 'polynomial'
+mutation_args: [0.0, 20] # probability, distribution_index, 0.0 pro indicates 1.0/x_dim
+#(The parameters of reference vectors are fixed.)
+
+# data_IO:
+path_pf: 'problems/DTLZ/'
+path_save: 'results/DTLZ/'
+
+# run time: 55 update iterations per min.  18mins for 1000 updates.
