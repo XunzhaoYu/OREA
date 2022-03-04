@@ -52,9 +52,9 @@ vs orea_meta.py:
 
 
 class OREA:
-    def __init__(self, config, name, dataset, pf, random_init=True):
+    def __init__(self, config, name, dataset, pf, init_path=None):
         self.config = deepcopy(config)
-        self.random_init = random_init
+        self.init_path = init_path
         # --- problem setups ---
         self.name = name
         self.n_vars = self.config['x_dim']
@@ -115,7 +115,6 @@ class OREA:
         self.pf = None  # pareto front: objective space
         self.pf_upperbound = self.pf_lowerbound = None  # pf boundaries
         
-        self.initial_pf = None  # the non-dominated solutions in the initial archive (objective space).     
         self.objective_range = None  # self.nadir_upperbound - self.pf_lowerbound
         self.normalized_pf = None
         self.pf_changed = self.range_changed = self.miss_counter = None  # update flags
@@ -137,7 +136,7 @@ class OREA:
         self.time = time()
         self.iteration = current_iteration
         # --- surrogate and archive variables ---
-        self.surrogate, self.X, self.Y = self._surrogate_init(b_exist=False)
+        self.surrogate, self.X, self.Y = self._surrogate_init()
         self.archive_size = len(self.X)
         self.nadir_upperbound = np.max(self.Y, axis=0)
         # --- pareto front variables ---
@@ -146,10 +145,8 @@ class OREA:
         self.ps, self.pf = self.ps_init()
         self.pf_upperbound = np.max(self.pf, axis=0)
         print("Initialization of non-dominated solutions:", np.shape(self.ps))
-        
-        self.initial_pf = self.pf.copy()
         print("Initial Pareto Front:")
-        print(self.initial_pf)
+        print(self.pf)
         self.objective_range = self.nadir_upperbound - self.pf_lowerbound
         self.objective_range[self.objective_range == 0] += 0.0001  # avoid NaN caused by dividing zero.
         print("Objective range:", self.objective_range)
@@ -174,31 +171,34 @@ class OREA:
         print("Initial IGD+ value: {:.4f}, IGD value: {:.4f}.".format(self.performance[0], self.performance[1]))
         self.recorder = Recorder(self.name)
         self.recorder.init(self.X, self.Y, self.performance, ['IGD+', 'IGD'])
+        if self.init_path is None:
+            path = self.config['path_save'] + self.name + "/Initial(" + str(self.n_vars) + "," + str(self.n_objs) + ")/" + \
+                   str(self.evaluation_init) + "_" + self.iteration + ".xlsx"
+            self.recorder.save(path)
         
 
     # Invoked by self.variable_init()
-    def _surrogate_init(self, b_exist=True):
+    def _surrogate_init(self):
         """
         Modify this method to initialize your 'self.surrogate'.
         :param b_exist: if surrogate is existing. Type: bool.
         :return X: initial samples. Type: 2darray. Shape: (self.evaluation_init, self.n_vars)
         :return Y: initial fitness. Type: 2darray. Shape: (self.evaluation_init, self.n_objs)
         """
-        if self.random_init:
+        if self.init_path is None:
             X, Y = self.dataset.sample(n_samples=self.evaluation_init)
         else:  # load pre-sampled dataset
-            str_ei = str(self.evaluation_init)
-            src_path = "result/DTLZ" + str(self.evaluation_max) + "_optimization/" + self.name + "/" + str_ei + "_" + self.name + "/" + \
-                       str_ei + "_" + self.name + "(" + str(self.n_vars) + "," + str(self.n_objs) + ")_" + self.iteration + ".xlsx"
-            src_file = xlrd.open_workbook(src_path)
+            path = self.init_path + self.name + "/Initial(" + str(self.n_vars) + "," + str(self.n_objs) + ")/" + \
+                   str(self.evaluation_init) + "_" + self.iteration + ".xlsx"
+            src_file = xlrd.open_workbook(path)
             src_sheets = src_file.sheets()
-            data0 = src_sheets[0]
+            src_sheet = src_sheets[0]
             X = np.zeros((self.evaluation_init, self.n_vars), dtype=float)
             Y = np.zeros((self.evaluation_init, self.n_objs), dtype=float)
             for index in range(self.evaluation_init):
-                temp = data0.row_values(index + 1)
-                X[index, :] = temp[self.n_objs + 2:]
-                Y[index, :] = temp[1:self.n_objs + 1]
+                row_data = src_sheet.row_values(index + 1)
+                X[index] = row_data[1:1 + self.n_vars]
+                Y[index] = row_data[1 + self.n_vars:1 + self.n_vars + self.n_objs]
         surrogate = Kriging(self.config, X)
         Y = np.around(Y, decimals=4)
         return surrogate, X, Y
@@ -490,6 +490,8 @@ class OREA:
         print("Current IGD+ value: {:.4f}, IGD value: {:.4f}.".format(self.performance[0], self.performance[1]))
 
     def get_result(self):
-        self.recorder.save(self.config['path_save'] + self.name + "-" + self.iteration + " igd+ " + str(np.around(self.performance[0], decimals=3)) + ".xlsx")
+        path = self.config['path_save'] + self.name + "/Total(" + str(self.n_vars) + "," + str(self.n_objs) + ")/" + \
+               str(self.evaluation_max) + "_" + self.iteration + " igd+ " + str(np.around(self.performance[0], decimals=3)) + ".xlsx"
+        self.recorder.save(path)
         return self.ps, self.performance[0]
 

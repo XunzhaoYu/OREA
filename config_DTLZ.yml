@@ -18,7 +18,7 @@ model_training_neighborhood_size: 10
 # SAEA configs:
 ## evaluations:
 evaluation_init: 109
-evaluation_max: 115
+evaluation_max: 300
 ## generation-based reproduction:
 search_evaluation_max: 3000
 population_size: 100
@@ -34,6 +34,6 @@ mutation_args: [0.0, 20] # probability, distribution_index, 0.0 pro indicates 1.
 
 # data_IO:
 path_pf: 'problems/DTLZ/'
-path_save: 'results/DTLZ/'
+path_save: 'results/'
 
 # run time: 55 update iterations per min.  18mins for 1000 updates.

@@ -14,6 +14,8 @@ class Recorder:
         # declare n_vars and n_objs
         self.n_vars = None
         self.n_objs = None
+        self.style = xlwt.XFStyle()
+        self.style.num_format_str = '0.0000'
 
     # record initial archive (X), fitness (Y), and performance.
     def init(self, X, Y, performance_list, performance_name_list):
@@ -36,7 +38,7 @@ class Recorder:
         self._write_data(row_index, x, y)
         # write performance
         for index in range(len(performance_list)):
-            self.record_sheet.write(row_index, self.n_vars + self.n_objs + index + 1, performance_list[index])
+            self.record_sheet.write(row_index, self.n_vars + self.n_objs + index + 1, performance_list[index], self.style)
 
     # record one evaluated solution (x, y):
     def _write_data(self, row_index, x, y):
@@ -44,10 +46,10 @@ class Recorder:
         self.record_sheet.write(row_index, 0, row_index)
         # write variables
         for dim_index in range(self.n_vars):
-            self.record_sheet.write(row_index, dim_index + 1, x[dim_index])
+            self.record_sheet.write(row_index, dim_index + 1, x[dim_index], self.style)
         # write objectives
         for dim_index in range(self.n_objs):
-            self.record_sheet.write(row_index, self.n_vars + dim_index + 1, y[dim_index])
+            self.record_sheet.write(row_index, self.n_vars + dim_index + 1, y[dim_index], self.style)
 
     # save record
     def save(self, name):
