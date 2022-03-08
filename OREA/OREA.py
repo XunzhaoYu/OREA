@@ -117,7 +117,8 @@ class OREA:
         
         self.objective_range = None  # self.nadir_upperbound - self.pf_lowerbound
         self.normalized_pf = None
-        self.pf_changed = self.range_changed = self.miss_counter = None  # update flags
+        self.pf_changed = self.range_changed =  None  # update flags
+        self.miss_counter = 0
         # --- labeling methods ---
         self.label = self.reference_point = self.rp_index_for_pf = None
         self.region_id = self.subspace_pf_counter = self.rp_subspace_indexes = self.candidate_subspace_indexes = None
