@@ -87,6 +87,5 @@ class ValueShift:
                 else:
                     new_individual.append(individual[i])
             unchanged_flag = unchanged_flag and unique
-        # print "new_individual: ", type(new_individual), new_individual  # list
         return new_individual
 

@@ -17,7 +17,6 @@ class inverted_generational_distance():
         min_dis = np.min(distances, axis=1)
         p_sum = np.power(np.sum(np.power(min_dis, self.p)), 1./self.p)
         return p_sum/len(min_dis)
-        #np.mean(np.min(distances, axis=1))
 
     def get_name(self):
         return 'IGD'

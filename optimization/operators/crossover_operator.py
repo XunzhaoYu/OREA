@@ -46,13 +46,6 @@ class SBX:
 
         # check boundaries
         offspring = np.minimum(np.maximum(offspring, lowerbound), upperbound)
-        """
-        for i in range(n_vars):
-            vio_upper = offspring[:, i] > upperbound[i]
-            offspring[vio_upper, i] = upperbound[i]
-            vio_lower = offspring[:, i] < lowerbound[i]
-            offspring[vio_lower, i] = lowerbound[i]
-        """
         return offspring
 
 

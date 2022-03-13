@@ -12,10 +12,13 @@ from optimization.operators.mutation_operator import *
 desired_width = 250
 np.set_printoptions(linewidth=desired_width)
 
-
 """ Written by Xun-Zhao Yu (yuxunzhao@gmail.com). Last update: 2022-Mar-01.
-A Kriging model trained by PSO.
+A Kriging model trained by PSO. Equations appear in the code are available in:
+D. R. Jones, M. Schonlau, and W. J. Welch, “Efficient global optimiza- tion of expensive black-box functions,” 
+Journal of Global Optimization, vol. 13, no. 4, pp. 455–492, 1998.
 """
+
+
 class Kriging:
     def __init__(self, config, data):
         # prior data

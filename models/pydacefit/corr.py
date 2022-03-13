@@ -4,7 +4,9 @@ import numpy as np
 
 """ Modified by Xun-Zhao Yu (yuxunzhao@gmail.com). Last update: 2022-Mar-13.
 Modifications made:
-1. Add a more flexible Gaussian correlation function: corr_gauss2(), making exponent 'p' adjustable.
+1. Add a more flexible Gaussian correlation function: corr_gauss2(), making exponent 'p' adjustable. This correlation function was used in:
+D. R. Jones, M. Schonlau, and W. J. Welch, “Efficient global optimiza- tion of expensive black-box functions,” 
+Journal of Global Optimization, vol. 13, no. 4, pp. 455–492, 1998.
 
 pydacefit source: https://github.com/msu-coinlab/pydacefit
 """

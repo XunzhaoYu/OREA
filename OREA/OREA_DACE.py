@@ -28,10 +28,9 @@ from tools.recorder import *
 """ Written by Xun-Zhao Yu (yuxunzhao@gmail.com). Last update: 2022-Mar-13.
 SSCI version OREA, use Kriging (DACEfit), has a higher computational efficiency than OREA.py.
 
-X. Yu, X. Yao, Y. Wang, L. Zhu and D. Filev, "Domination-Based Ordinal Regression for Expensive Multi-Objective Optimization," 
-2019 IEEE Symposium Series on Computational Intelligence (SSCI), 2019, pp. 2058-2065, doi: 10.1109/SSCI44817.2019.9002828.
+X. Yu, X. Yao, Y. Wang, L. Zhu, and D. Filev, “Domination-based ordinal regression for expensive multi-objective optimization,” 
+in Proceedings of the 2019 IEEE Symposium Series on Computational Intelligence (SSCI’19), 2019, pp. 2058–2065.
 """
-
 
 
 class OREA:
@@ -250,9 +249,10 @@ class OREA:
     def run(self, current_iteration):
         self.variable_init(current_iteration)
         while self.archive_size < self.evaluation_max:
+            """
             if (self.archive_size - self.evaluation_init) % 10 == 0:
                 self.recorder.save("Temp-" + self.name + "-" + self.iteration + ".xlsx")
-
+            """
             print(" ")
             print(" --- Labeling and Training Kriging model... --- ")
             self.label = np.zeros(self.archive_size)
