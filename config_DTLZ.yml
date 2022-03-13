@@ -9,10 +9,14 @@ x_lowerbound: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 n_levels: 10
 coe_range: [0.00001, 10.]
 exp_range: [1., 2.]
+### For the Kriging fitted by maximize negative likelihood (see models/Kriging.py).
 model_training_evaluation_init: 3000
 model_training_evaluation: 1000
 model_training_population_size: 100
 model_training_neighborhood_size: 10
+### For the Kriging implemented by DACE (see models/pydacefit)
+dace_training_iteration_init: 8
+dace_training_iteration: 4
 #(To set PSO parameters, see optimization/PSO.py)
 
 # SAEA configs:
@@ -36,4 +40,3 @@ mutation_args: [0.0, 20] # probability, distribution_index, 0.0 pro indicates 1.
 path_pf: 'problems/DTLZ/'
 path_save: 'results/'
 
-# run time: 55 update iterations per min.  18mins for 1000 updates.

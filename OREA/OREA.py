@@ -3,7 +3,6 @@
 import numpy as np
 from scipy import spatial
 import xlrd
-import xlwt
 from time import time
 from copy import deepcopy
 # --- surrogate modeling ---
@@ -24,30 +23,8 @@ from tools.recorder import *
 """ Written by Xun-Zhao Yu (yuxunzhao@gmail.com). Last update: 2022-Mar-01.
 SSCI version OREA, use Kriging (not DACEfit).
 
-for orea.py and orea_noMiss.py:
-Kriging parameter range: Kriging.py (or choose Kriging_2.py to set p=2 by default.)
-Other orea files(orea_dace.py, orea_meta.py), their parameter range is setup in config file.
-
-vs orea_noMiss.py:
-    1> No_miss: def _reproduce_by_one_mutation() 
-    
-vs orea_dace.py: 
-    1> No_miss: def _reproduce_by_one_mutation() 
-    2> !!! for kriging only.
-    3> self.search_evaluation_max = 3000  (DACEfit is time-consuming in prediction)
-    4> class name: OREA_DACE, add DACE package
-    
-vs orea_meta.py:
-    1> No_miss: def _reproduce_by_one_mutation() 
-    2> b_meta = True
-    3> In def cal_EI(self, x): (prediction)
-        x = np.array(x).reshape(1, 1, -1)
-        mu_hat, sigma2_hat = self.surrogate.predict(self.q_phi_train, self.q_mu, self.q_sigma2, self.q_invR_ycen, self.q_chol_L, x) 
-    4> variable_init:
-        self.q_phi_train = self.q_mu = self.q_sigma2 = self.q_invR_ycen = self.q_chol_L = None
-    5> time test code
-    * DTLZ_variants:
-        samples are labeled before doing meta-learning, so we label all DTLZ variants by default.
+X. Yu, X. Yao, Y. Wang, L. Zhu and D. Filev, "Domination-Based Ordinal Regression for Expensive Multi-Objective Optimization," 
+2019 IEEE Symposium Series on Computational Intelligence (SSCI), 2019, pp. 2058-2065, doi: 10.1109/SSCI44817.2019.9002828.
 """
 
 
@@ -492,7 +469,7 @@ class OREA:
 
     def get_result(self):
         path = self.config['path_save'] + self.name + "/Total(" + str(self.n_vars) + "," + str(self.n_objs) + ")/" + \
-               str(self.evaluation_max) + "_" + self.iteration + " igd+ " + str(np.around(self.performance[0], decimals=3)) + ".xlsx"
+               str(self.evaluation_max) + "_" + self.iteration + " igd+ " + str(np.around(self.performance[1], decimals=4)) + ".xlsx"
         self.recorder.save(path)
         return self.ps, self.performance[0]
 

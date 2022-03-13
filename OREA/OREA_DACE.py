@@ -10,11 +10,11 @@ from copy import deepcopy
 from models.pydacefit.dace import *
 from models.pydacefit.regr import *
 from models.pydacefit.corr import *
-from inspyred import ec
-from random import Random
 # --- OREA ---
 from OREA.reference_vector import generate_vectors
 from OREA.labeling_operator import domination_based_ordinal_values
+from inspyred import ec
+from random import Random
 # --- optimization libraries ---
 from optimization.operators.crossover_operator import *
 from optimization.operators.mutation_operator import *
@@ -25,8 +25,11 @@ from optimization.performance_indicators import *
 # --- tools ---
 from tools.recorder import *
 
-""" Written by Xun-Zhao Yu (yuxunzhao@gmail.com). Last update: 2022-Mar-11.
-SSCI version OREA, use Kriging (DACEfit).
+""" Written by Xun-Zhao Yu (yuxunzhao@gmail.com). Last update: 2022-Mar-13.
+SSCI version OREA, use Kriging (DACEfit), has a higher computational efficiency than OREA.py.
+
+X. Yu, X. Yao, Y. Wang, L. Zhu and D. Filev, "Domination-Based Ordinal Regression for Expensive Multi-Objective Optimization," 
+2019 IEEE Symposium Series on Computational Intelligence (SSCI), 2019, pp. 2058-2065, doi: 10.1109/SSCI44817.2019.9002828.
 """
 
 
@@ -48,8 +51,10 @@ class OREA:
 
         # --- surrogate setups ---
         self.n_levels = self.config['n_levels']
-        self.model_training_evaluation_init = self.config['model_training_evaluation_init']
-        self.model_training_evaluation = self.config['model_training_evaluation']
+        self.dace_training_iteration_init = self.config['dace_training_iteration_init']
+        self.dace_training_iteration = self.config['dace_training_iteration']
+        self.coe_range = self.config['coe_range']
+        self.exp_range = self.config['exp_range']
 
         # --- optimization algorithm setups ---
         self.evaluation_init = self.config['evaluation_init']
@@ -84,6 +89,7 @@ class OREA:
         self.time = None
         self.iteration = None
         # --- --- surrogate and archive variables --- ---
+        self.theta = np.zeros((2*self.n_vars))  # parameters of the ordinal regression surrogates
         self.surrogate = None
         self.X = None
         self.Y = None
@@ -117,7 +123,8 @@ class OREA:
         self.time = time()
         self.iteration = current_iteration
         # --- surrogate and archive variables ---
-        self.surrogate, self.X, self.Y = self._surrogate_init()
+        self.theta = np.append(np.ones(self.n_vars) * np.mean(self.coe_range), np.ones(self.n_vars) * np.mean(self.exp_range))
+        self.X, self.Y = self._archive_init()
         self.archive_size = len(self.X)
         self.nadir_upperbound = np.max(self.Y, axis=0)
         # --- pareto front variables ---
@@ -159,7 +166,7 @@ class OREA:
         
 
     # Invoked by self.variable_init()
-    def _surrogate_init(self):
+    def _archive_init(self):
         """
         Modify this method to initialize your 'self.surrogate'.
         :param b_exist: if surrogate is existing. Type: bool.
@@ -180,11 +187,8 @@ class OREA:
                 row_data = src_sheet.row_values(index + 1)
                 X[index] = row_data[1:1 + self.n_vars]
                 Y[index] = row_data[1 + self.n_vars:1 + self.n_vars + self.n_objs]
-        #surrogate = DACE(regr=regr_quadratic, corr=corr_gauss, theta=np.ones(self.n_vars)*10.0,
-        surrogate = DACE(regr=regr_constant, corr=corr_gauss, theta=np.ones(self.n_vars)*10.0,
-                         thetaL=np.ones(self.n_vars)*self.config['dace_range'][0], thetaU=np.ones(self.n_vars)*self.config['dace_range'][1])
-        Y = np.around(Y, decimals=4)
-        return surrogate, X, Y
+            Y = np.around(Y, decimals=4)
+        return X, Y
 
     """
     Pareto Set/Front methods
@@ -255,7 +259,16 @@ class OREA:
             last_n_levels = self.n_levels
             self.label, self.n_levels, self.reference_point, self.rp_index_for_pf = \
                 domination_based_ordinal_values(self.pf_index, self.Y, self.pf_upperbound, self.pf_lowerbound, self.n_levels, overfitting_coeff=0.03, b_print=False)
-            self.surrogate.fit(self.X, self.label)
+
+            self.surrogate = DACE(regr=regr_constant, corr=corr_gauss2, theta=self.theta,
+                             thetaL=np.append(np.ones(self.n_vars) * self.coe_range[0], np.ones(self.n_vars) * self.exp_range[0]),
+                             thetaU=np.append(np.ones(self.n_vars) * self.coe_range[1], np.ones(self.n_vars) * self.exp_range[1]))
+            if self.n_levels == last_n_levels:
+                self.surrogate.fit(self.X, self.label, self.dace_training_iteration)
+            else:
+                self.surrogate.fit(self.X, self.label, self.dace_training_iteration_init)
+            self.theta = self.surrogate.model["theta"]
+            print("updated theta:", self.theta)
 
             print(" --- Reproduction: searching for minimal negative EI... --- ")
             self.new_point = np.zeros((self.n_reproduction, self.n_vars))
@@ -463,7 +476,7 @@ class OREA:
 
     def get_result(self):
         path = self.config['path_save'] + self.name + "/Total(" + str(self.n_vars) + "," + str(self.n_objs) + ")/" + \
-               str(self.evaluation_max) + "_" + self.iteration + " igd+ " + str(np.around(self.performance[0], decimals=3)) + ".xlsx"
+               str(self.evaluation_max) + "_" + self.iteration + " igd " + str(np.around(self.performance[1], decimals=4)) + ".xlsx"
         self.recorder.save(path)
         return self.ps, self.performance[0]
 
