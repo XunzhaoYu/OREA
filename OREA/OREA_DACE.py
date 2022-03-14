@@ -18,7 +18,7 @@ from random import Random
 # --- optimization libraries ---
 from optimization.operators.crossover_operator import *
 from optimization.operators.mutation_operator import *
-from optimization.operators.selection_operator import *
+#from optimization.operators.selection_operator import *
 from optimization.PSO import *
 from optimization.EI import *
 from optimization.performance_indicators import *
@@ -355,13 +355,7 @@ class OREA:
                 print("mating 2:", mating2_index, mating_population[1], self.Y[mating2_index])
 
                 local_origin = self.crossover_op.execute(mating_population, self.upperbound, self.lowerbound)
-                #"""
-                if random() < 0.5:
-                    local_origin = local_origin[0]
-                else:
-                    local_origin = local_origin[1]
-                # """
-                #self.new_point[0] = self._reproduce_by_one_mutation(local_origin[0], times_per_gene=self.n_variants, miss=int(self.miss_counter))
+                local_origin = local_origin[0] if np.random.rand() < 0.5 else local_origin[1]
                 self.new_point[1] = self._reproduce_by_one_mutation(local_origin, times_per_gene=self.n_variants, miss=int(self.miss_counter))
 
             # end of selection process.
