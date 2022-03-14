@@ -6,7 +6,7 @@ from time import time
 from problems.DTLZ.DTLZ import *
 #from OREA.OREA import *
 from OREA.OREA_DACE import *
-from tools.data_IO import load_PF
+#from tools.data_IO import load_PF
 
 desired_width = 160
 np.set_printoptions(linewidth=desired_width)
@@ -20,11 +20,11 @@ cfg_filename = 'config_DTLZ.yml'
 with open(cfg_filename,'r') as ymlfile:
     config = yaml.load(ymlfile)
 
-name = 'DTLZ1'
-dataset = DTLZ1(config)
+name = 'DTLZ3'
+dataset = DTLZ3(config)
 
 # get the Pareto Front of DTLZ
-#"""
+"""
 pf = load_PF(name)
 """
 pf_path = config['path_pf'] + name + " PF " + str(config['y_dim']) + "d "+str(5000)+".xlsx"
@@ -42,8 +42,8 @@ for iteration in range(0, iteration_max):
     alg = OREA(config, name, dataset, pf, init_path='results/')
     alg.run(current_iteration)
     t = time() - time1
-    print('run time:', t // 60, " mins, ", t % 60, " secs.")
-    solution, minimum = alg.get_result()  # (b_save=False)
+    print("run time: {:.0f} mins, {:.2f} secs.".format(t // 60, t % 60))
+    solution, minimum = alg.get_result()
     print("solution: ", type(solution))
     print(solution)
     print("minimum: ", type(minimum))
