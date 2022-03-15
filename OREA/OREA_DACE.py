@@ -25,7 +25,7 @@ from optimization.performance_indicators import *
 # --- tools ---
 from tools.recorder import *
 
-""" Written by Xun-Zhao Yu (yuxunzhao@gmail.com). Last update: 2022-Mar-13.
+""" Written by Xun-Zhao Yu (yuxunzhao@gmail.com). Last update: 2022-Mar-15.
 SSCI version OREA, use Kriging (DACEfit), has a higher computational efficiency than OREA.py.
 
 X. Yu, X. Yao, Y. Wang, L. Zhu, and D. Filev, “Domination-based ordinal regression for expensive multi-objective optimization,” 
@@ -50,6 +50,7 @@ class OREA:
 
         # --- surrogate setups ---
         self.n_levels = self.config['n_levels']
+        self.overfitting_coe = self.config['overfitting_coe']
         self.dace_training_iteration_init = self.config['dace_training_iteration_init']
         self.dace_training_iteration = self.config['dace_training_iteration']
         self.coe_range = self.config['coe_range']
@@ -87,26 +88,29 @@ class OREA:
         # --- variables declarations ---
         self.time = None
         self.iteration = None
-        # --- --- surrogate and archive variables --- ---
-        self.theta = np.zeros((2*self.n_vars))  # parameters of the ordinal regression surrogates
-        self.surrogate = None
+        # --- --- archive and surrogate variables --- ---
         self.X = None
         self.Y = None
         self.archive_size = 0
+        self.theta = np.zeros((2*self.n_vars))  # parameters of the ordinal regression surrogates
+        self.surrogate = None
         self.nadir_upperbound = None  # upperbound of Y.
-        # --- --- pareto front variables --- ---
+        # --- --- non-dominated solution variables --- ---
         self.pf_index = None  # the indexes of pareto set solutions in the archive.
-        self.ps = None  # pareto set: decision space
-        self.pf = None  # pareto front: objective space
+        self.ps = None  # current ps (non-dominated solutions in the decision space)
+        self.pf = None  # current pf (pareto front in the objective space)
         self.pf_upperbound = self.pf_lowerbound = None  # pf boundaries
-        
+        self.new_point = None
+        self.new_objs = None
+
         self.objective_range = None  # self.nadir_upperbound - self.pf_lowerbound
         self.normalized_pf = None
         self.pf_changed = self.range_changed =  None  # update flags
         self.miss_counter = 0
         # --- labeling methods ---
-        self.label = self.reference_point = self.rp_index_for_pf = None
-        self.region_id = self.subspace_pf_counter = self.rp_subspace_indexes = self.candidate_subspace_indexes = None
+        self.label = self.reference_point = self.rp_index_in_pf = None
+        self.region_id = self.region_counter = None
+        self.rp_region_set = self.non_empty_region_set = self.candidate_region_set = None
         # --- recorder ---
         self.performance = np.zeros(2)
         self.recorder = None
@@ -121,10 +125,13 @@ class OREA:
         """
         self.time = time()
         self.iteration = current_iteration
-        # --- surrogate and archive variables ---
-        self.theta = np.append(np.ones(self.n_vars) * np.mean(self.coe_range), np.ones(self.n_vars) * np.mean(self.exp_range))
+        # --- --- archive and surrogate variables --- ---
         self.X, self.Y = self._archive_init()
         self.archive_size = len(self.X)
+        self.theta = np.append(np.ones(self.n_vars) * np.mean(self.coe_range), np.ones(self.n_vars) * np.mean(self.exp_range))
+        self.surrogate = DACE(regr=regr_constant, corr=corr_gauss2, theta=self.theta,
+                              thetaL=np.append(np.ones(self.n_vars) * self.coe_range[0], np.ones(self.n_vars) * self.exp_range[0]),
+                              thetaU=np.append(np.ones(self.n_vars) * self.coe_range[1], np.ones(self.n_vars) * self.exp_range[1]))
         self.nadir_upperbound = np.max(self.Y, axis=0)
         # --- pareto front variables ---
         self.pf_lowerbound = np.ones((self.n_objs,)) * float('inf')
@@ -145,13 +152,13 @@ class OREA:
         # --- labeling methods ---
         self.label = None  #np.zeros((1, self.archive_size))
         self.reference_point = np.zeros((1, self.n_objs))
-        self.rp_index_for_pf = []  # indexes in pf.
+        self.rp_index_in_pf = []  # indexes in pf.
 
-        self.region_id = np.ones((self.archive_size,), dtype=int) * -1
-        self.subspace_pf_counter = []
-        self.rp_subspace_indexes = []  # the index list of subspaces which contain Reference Points.
-        # local: self.non_empty_subspace_indexes  # the index list of subspaces with at least one pf points
-        self.candidate_subspace_indexes = []  # the index list of subspaces with the least pf points, should be updated once pf is changed.
+        self.region_id = np.ones((self.archive_size,), dtype=int) * -1  # record the region id for all non-dominated solutions.
+        self.region_counter = []  # count how many non-dominated solutions in each region.
+        self.rp_region_set = []  # the set of regions which contain Reference Points.
+        self.non_empty_region_set = []  # the set of regions with at least one non-dominated solution.
+        self.candidate_region_set = []  # the set of regions with the least non-dominated solutions, should be updated once non-dominated solutions are changed.
         # --- recorder ---
         self.performance[0] = self.indicator_IGD_plus.compute(self.pf)
         self.performance[1] = self.indicator_IGD.compute(self.pf)
@@ -167,8 +174,7 @@ class OREA:
     # Invoked by self.variable_init()
     def _archive_init(self):
         """
-        Modify this method to initialize your 'self.surrogate'.
-        :param b_exist: if surrogate is existing. Type: bool.
+        Modify this method to initialize your 'self.X'.
         :return X: initial samples. Type: 2darray. Shape: (self.evaluation_init, self.n_vars)
         :return Y: initial fitness. Type: 2darray. Shape: (self.evaluation_init, self.n_objs)
         """
@@ -249,20 +255,12 @@ class OREA:
     def run(self, current_iteration):
         self.variable_init(current_iteration)
         while self.archive_size < self.evaluation_max:
-            """
-            if (self.archive_size - self.evaluation_init) % 10 == 0:
-                self.recorder.save("Temp-" + self.name + "-" + self.iteration + ".xlsx")
-            """
             print(" ")
             print(" --- Labeling and Training Kriging model... --- ")
             self.label = np.zeros(self.archive_size)
             last_n_levels = self.n_levels
-            self.label, self.n_levels, self.reference_point, self.rp_index_for_pf = \
-                domination_based_ordinal_values(self.pf_index, self.Y, self.pf_upperbound, self.pf_lowerbound, self.n_levels, overfitting_coeff=0.03, b_print=False)
-
-            self.surrogate = DACE(regr=regr_constant, corr=corr_gauss2, theta=self.theta,
-                             thetaL=np.append(np.ones(self.n_vars) * self.coe_range[0], np.ones(self.n_vars) * self.exp_range[0]),
-                             thetaU=np.append(np.ones(self.n_vars) * self.coe_range[1], np.ones(self.n_vars) * self.exp_range[1]))
+            self.label, self.n_levels, self.reference_point, self.rp_index_in_pf = domination_based_ordinal_values(
+                self.pf_index, self.Y, self.pf_upperbound, self.pf_lowerbound, self.n_levels, overfitting_coeff=self.overfitting_coe, b_print=False)
             if self.n_levels == last_n_levels:
                 self.surrogate.fit(self.X, self.label, self.dace_training_iteration)
             else:
@@ -274,7 +272,7 @@ class OREA:
             self.new_point = np.zeros((self.n_reproduction, self.n_vars))
             if len(self.pf_index) == 1:
                 for i in range(self.n_reproduction):
-                    self.new_point[i] = self._reproduce_by_one_mutation(self.X[self.pf_index[0]], times_per_gene=self.n_variants, miss=int(self.miss_counter))
+                    self.new_point[i] = self._reproduce_by_one_mutation(self.X[self.pf_index[0]], times_per_gene=self.n_variants)
             else:
                 new_point_pre = self._reproduce_by_PSO(self.n_gen_reproduction)
                 self.new_point[0] = new_point_pre[0]
@@ -282,95 +280,93 @@ class OREA:
                 print(" --- --- IndReproduction: mating 1: --- --- ")
                 if self.pf_changed:
                     self._get_region_ID(self.normalized_pf)
-                    print("pf id:", self.region_id)
-
-                    # record indexes of the subspaces which contain level0 points(reference points).
-                    self.rp_subspace_indexes = []
-                    for i in self.rp_index_for_pf:
-                        self.rp_subspace_indexes.append(self.region_id[i])
-                    self.rp_subspace_indexes = np.array(list(set(self.rp_subspace_indexes)))
-                    print("rp subspace id:", self.rp_subspace_indexes)
-
-                    # 每个子空间有几个pf点
-                    self.subspace_pf_counter = np.zeros((self.n_vectors), dtype=int)
+                    print("region id of non-dominated solutions:", self.region_id)
+                    # --- record indexes of the regions which contain level0 points (reference points) ---
+                    # --- 记录拥有reference points的区域的下标 ---
+                    self.rp_region_set = np.array(list(set(self.region_id[self.rp_index_in_pf])))
+                    print("region id set of reference points:", self.rp_region_set)
+                    # --- count how many non-dominated solutions exist in each region ---
+                    # --- 计算每个区域有几个non-dominated的解 ---
+                    self.region_counter = np.zeros((self.n_vectors), dtype=int)
                     for i in range(len(self.region_id)):
-                        self.subspace_pf_counter[self.region_id[i]] += 1
-
-                    # delete subspaces without pf points: all subspace indexes -> non_empty_subspace_indexes
-                    n_points_order = np.argsort(self.subspace_pf_counter)  # rank: min -> max
+                        self.region_counter[self.region_id[i]] += 1
+                    # --- delete regions without non-dominated points: all region indexes -> non_empty_region_indexes ---
+                    # --- 删除没有non-dominated solution的区域下标，只留下非空的区域的下标 ---
+                    n_points_order = np.argsort(self.region_counter)  # rank: min -> max
                     min_n_points, min_n_index = 0, 0
                     for index, rank in enumerate(n_points_order):
-                        if self.subspace_pf_counter[rank] > 0:
-                            min_n_points = self.subspace_pf_counter[rank]
+                        if self.region_counter[rank] > 0:
+                            min_n_points = self.region_counter[rank]  # the minimal number of non-dominated solutions in a non_empty_region
                             min_n_index = index
                             break
-                    self.non_empty_subspace_indexes = n_points_order[min_n_index:]
-
-                    # select subspaces with the least PF points: non_empty_subspace_indexes -> candidate_subspace_indexes
-                    self.candidate_subspace_indexes = []
-                    for subspace_index in self.non_empty_subspace_indexes:
-                        if self.subspace_pf_counter[subspace_index] > min_n_points:
+                    self.non_empty_region_set = n_points_order[min_n_index:]
+                    # --- select regions with the least non-dominated points: non_empty_region_set -> candidate_region_set ---
+                    # --- 选择拥有最少的non-dominated solutions的区域做为候选区域 ---
+                    self.candidate_region_set = []
+                    for region_index in self.non_empty_region_set:
+                        if self.region_counter[region_index] > min_n_points:
                             break
-                        self.candidate_subspace_indexes.append(subspace_index)
+                        self.candidate_region_set.append(region_index)
 
-                target_subspace = np.random.choice(self.candidate_subspace_indexes, 1)[0]  # 第 target 个子空间有最少的pf点,最少为1.
-                print("target subspace:", target_subspace, "in", self.candidate_subspace_indexes, ":", self.vectors[target_subspace])
-
-                pf_index_in_subspace = [s for s in range(len(self.region_id)) if self.region_id[s] == target_subspace]  # subspace pf points: index in pf_index
-                target_pf_index = self.pf_index[
-                    pf_index_in_subspace]  # [self.pf_index[s] for s in pf_index_in_subspace]  # subspace pf points: index in archive
-                print("PF indexes in target subspace:", target_pf_index)
-
-                # select point with maximal label value in subspace: crossover operator added.
+                # --- randomly pick a candidate region as the target region in this iteration ---
+                # --- 从候选区域中随机选取一个做为本轮的目标区域 ---
+                target_region = np.random.choice(self.candidate_region_set, 1)[0]
+                print("target region:", target_region, "from candidate region set", self.candidate_region_set, ". reference vector:", self.vectors[target_region])
+                # --- select non-dominated solution(s) with maximal label value in the target region ---
+                # --- 从目标区域选择一个最大label值的解 ---
+                target_pf_index_in_pf = [s for s in range(len(self.region_id)) if self.region_id[s] == target_region]
+                target_pf_index = self.pf_index[target_pf_index_in_pf]   # non-dominated solution indexes in the target region: index in archive
+                print("indexes of non-dominated solutions in the target region:", target_pf_index)
                 max_value = np.max(self.label[target_pf_index])
-                candidate_indexes = [ind for ind in pf_index_in_subspace if self.label[self.pf_index[ind]] == max_value]  # index for pf_index
-                # select based on crowd
-                candidate_distance = spatial.distance.cdist(self.normalized_pf[candidate_indexes], self.normalized_pf[candidate_indexes])
-                candidate_distance += np.eye(len(candidate_indexes)) * float('inf')
-
-                mating1_index = self.pf_index[candidate_indexes[np.argmax(np.min(candidate_distance, axis=1), axis=0)]]
+                candidate_indexes = [ind for ind in target_pf_index_in_pf if self.label[self.pf_index[ind]] == max_value]  # index in pf_index
+                if len(candidate_indexes) == 1:
+                    mating1_index = self.pf_index[candidate_indexes[0]]
+                else:  # --- select based on crowd --- 如果很多解都有最大label值，则根据解的稀疏程度选取一个
+                    candidate_distance = spatial.distance.cdist(self.normalized_pf[candidate_indexes], self.normalized_pf[candidate_indexes])
+                    candidate_distance += np.eye(len(candidate_indexes)) * 2 * np.amax(candidate_distance)
+                    mating1_index = self.pf_index[candidate_indexes[np.argmax(np.min(candidate_distance, axis=1), axis=0)]]
 
                 mating_population = np.zeros((2, self.n_vars))
                 mating_population[0] = self.X[mating1_index]
                 print("mating 1:", mating1_index, mating_population[0], self.Y[mating1_index])
 
                 print(" --- --- IndReproduction: mating 2: --- --- ")
-                # """
-                random_subspace = target_subspace
+                random_region = target_region
                 random_candidate_indexes = []
-                if len(self.rp_subspace_indexes) == 1 and self.rp_subspace_indexes[0] == target_subspace:  # reference points 全在 target 子空间
-                    random_subspace = np.random.choice(self.candidate_subspace_indexes, 1)[0]
+                # --- if all reference points are located in the target region ---
+                # --- 假如 reference points 全在 target 区域 ---
+                if len(self.rp_region_set) == 1 and self.rp_region_set[0] == target_region:
+                    random_region = np.random.choice(self.candidate_region_set, 1)[0]
                     for i, id in enumerate(self.region_id):
-                        if id == random_subspace:
+                        if id == random_region:
                             random_candidate_indexes.append(self.pf_index[i])
-                else:
-                    while random_subspace == target_subspace:
-                        random_subspace = np.random.choice(self.rp_subspace_indexes, 1)[0]
-                    for i, id in enumerate(self.region_id[self.rp_index_for_pf]):
-                        if id == random_subspace:
-                            random_candidate_indexes.append(self.pf_index[self.rp_index_for_pf[i]])
-                print("random subspace:", random_subspace, "RP indexes in random subspace", random_candidate_indexes)
+                else:  # --- select a random region (not the target one) ---
+                    while random_region == target_region:
+                        random_region = np.random.choice(self.rp_region_set, 1)[0]
+                    for i, id in enumerate(self.region_id[self.rp_index_in_pf]):
+                        if id == random_region:
+                            random_candidate_indexes.append(self.pf_index[self.rp_index_in_pf[i]])
+                print("random region:", random_region, "RP indexes in random region", random_candidate_indexes)
                 mating2_index = np.random.choice(random_candidate_indexes, 1)[0]
                 mating_population[1] = self.X[mating2_index]
                 print("mating 2:", mating2_index, mating_population[1], self.Y[mating2_index])
 
                 local_origin = self.crossover_op.execute(mating_population, self.upperbound, self.lowerbound)
                 local_origin = local_origin[0] if np.random.rand() < 0.5 else local_origin[1]
-                self.new_point[1] = self._reproduce_by_one_mutation(local_origin, times_per_gene=self.n_variants, miss=int(self.miss_counter))
+                self.new_point[1] = self._reproduce_by_one_mutation(local_origin, times_per_gene=self.n_variants)
 
             # end of selection process.
-            self.new_point_objs = self._population_evaluation(self.new_point, True, self.upperbound, self.lowerbound)
+            self.new_objs = self._population_evaluation(self.new_point, True, self.upperbound, self.lowerbound)
             print(" --- Evaluate on fitness function... ---")
             print("new point:", self.new_point)
-            print("new point objective ", self.new_point_objs)
+            print("new point objective ", self.new_objs)
             # --- update archive, archive_fitness, distance in model ---
             self.X = np.append(self.X, self.new_point, axis=0)
-            self.Y = np.append(self.Y, self.new_point_objs, axis=0)
+            self.Y = np.append(self.Y, self.new_objs, axis=0)
             self.archive_size += self.n_reproduction
 
             # after used to initialize the kriging model, the archive then used to save Pareto optimal solutions
             self._progress_update()
-
 
     def _reproduce_by_PSO(self, n_selected_population=1):
         ea = PSO(Random())
@@ -390,7 +386,7 @@ class OREA:
             selected_population[i] = ind.candidate
         return selected_population
 
-    def _reproduce_by_one_mutation(self, origin, times_per_gene=100, miss=0):
+    def _reproduce_by_one_mutation(self, origin, times_per_gene=100):
         neg_ei = np.zeros((self.n_vars * times_per_gene))
         new_point = np.tile(origin.copy(), (self.n_vars * times_per_gene, 1))
 
@@ -398,16 +394,6 @@ class OREA:
         for i in range(self.n_vars * times_per_gene):
             neg_ei[i] = self.cal_EI(mutant[i])
         return mutant[np.argmin(neg_ei)].copy()
-        """  # the mechanism of miss_counter is deleted to simplify OREA
-        if miss < 1:
-            return mutant[np.argmin(neg_ei)].copy()
-        else:
-            order = np.argsort(neg_ei)
-            miss = min(self.n_vars - 1, miss)
-            selected = np.random.choice(order[:miss * times_per_gene], 1)[0]
-            new_point = mutant[selected].copy()
-            return new_point
-        """
 
     def cal_EI_for_inspyred(self, candidates, args):
         fitness = []
@@ -425,7 +411,6 @@ class OREA:
             ei = EI(minimum=-1.0, mu=-mu_hat, sigma=np.sqrt(sigma2_hat))
         return -ei
 
-
     def _get_region_ID(self, region_points, incremental=False):
         projection_length = self.normalized_vs.dot(region_points.T)  # n_vectors * archive_size
         region_id = np.ones((len(region_points)), dtype=int) * -1
@@ -442,11 +427,11 @@ class OREA:
         self.pf_changed, self.range_changed = False, False
         for new_index in range(self.n_reproduction):
             index = self.archive_size - self.n_reproduction + new_index
-            self.ps, self.pf = self.get_ps(self.ps, self.pf, np.array([self.new_point[new_index]]), np.array([self.new_point_objs[new_index]]), index)
+            self.ps, self.pf = self.get_ps(self.ps, self.pf, np.array([self.new_point[new_index]]), np.array([self.new_objs[new_index]]), index)
             if self.pf_changed:
                 self.performance[0] = self.indicator_IGD_plus.compute(self.pf)
                 self.performance[1] = self.indicator_IGD.compute(self.pf)
-            self.recorder.write(index+1, self.new_point[new_index], self.new_point_objs[new_index], self.performance)
+            self.recorder.write(index+1, self.new_point[new_index], self.new_objs[new_index], self.performance)
         print("update archive to keep all individuals non-dominated. ", np.shape(self.ps))
 
         # update three bounds for pf, and also update normalized pf
@@ -455,10 +440,10 @@ class OREA:
             self.objective_range[self.objective_range == 0] =+ 0.0001
 
         if self.pf_changed:
-            print("pf_index", self.pf_index)
-            print("pf", self.pf)
+            print("current pf_index", self.pf_index)
+            print("current pf", self.pf)
             self.pf_upperbound = np.max(self.pf, axis=0)
-            print("pf upper bound:", self.pf_upperbound)
+            print("current pf upper bound:", self.pf_upperbound)
 
         if self.range_changed or self.pf_changed:
             self.normalized_pf = (self.pf-self.pf_lowerbound)/self.objective_range

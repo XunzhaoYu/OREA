@@ -7,6 +7,7 @@ x_lowerbound: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 ## Kriging model setup:
 n_levels: 10
+overfitting_coe: 0.03
 coe_range: [0.00001, 10.]
 exp_range: [1., 2.]
 ### For the Kriging fitted by maximize negative likelihood (see models/Kriging.py).

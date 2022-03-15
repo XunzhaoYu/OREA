@@ -10,7 +10,8 @@ Modifications made:
     Note: For improving the computational efficiency of prediction.
 2. function 'boxmin': add a parameter 'max_iter'.  
     Note: Ordinal regression is not stable as fitness regression, so we need a flexible fitting setup.
-    
+3. function 'fit': self.theta = self.model['theta']
+    Note: Update self.theta after training.
 pydacefit source: https://github.com/msu-coinlab/pydacefit
 """
 
@@ -60,7 +61,7 @@ class DACE:
         # intermediate steps saved during hyperparameter optimization
         self.itpar = None
 
-    def fit(self, X, Y, max_iter):
+    def fit(self, X, Y, max_iter=4):
 
         # the targets should be a 2d array
         if len(Y.shape) == 1:
@@ -88,6 +89,9 @@ class DACE:
 
         self.model = {**self.model, 'mX': mX, 'sX': sX, 'mY': mY, 'sY': sY, 'nX': nX, 'nY': nY}
         self.model['sigma2'] = np.square(sY) @ self.model['_sigma2']
+
+        # update theta.
+        self.theta = self.model['theta']
 
     def predict(self, _X, return_mse=False, return_gradient=False, return_mse_gradient=False):
 
