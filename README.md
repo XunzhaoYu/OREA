@@ -18,7 +18,7 @@ Some Features:
 Execution:
 
 Open 'Tester_OREA.py' or 'Tester_OREA.ipynb', set the benchmark testing function you want to run, and choose the number of runs (1-30). The results will be saved in the format: 'results/DTLZ1/Total(10,3)/'. Currently, a set of initial datasets has been uploaded for 10 variable, 3 objective DTLZ testing functions. 
-If you want to generate your own initial datasets, set 'init_path == None'.
+If you want to generate your own initial datasets, set 'init_path = None'.
 
 
 Contact:
