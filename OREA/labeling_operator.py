@@ -3,34 +3,19 @@ import numpy as np
 from scipy import spatial
 from time import time
 
-
-""" Written by Xun-Zhao Yu (yuxunzhao@gmail.com). Last update: 2022-Mar-01.
-labeling by pareto front
+""" Written by Xun-Zhao Yu (yuxunzhao@gmail.com). Last update: 2022-Mar-15.
+labeling by domination-based ordinal relations
 """
-def getPF(fitnesses, y):
-    diff = fitnesses - y
-    for i in range(len(diff)):
-        if (diff[i] == 0).all():
-            return fitnesses
-    indexes = [index for index in range(len(fitnesses)) if min(diff[index]) < 0]
-    new_fitnesses = fitnesses[indexes].copy()
-    if min(np.max(diff, axis=1)) > 0:
-        return np.append(new_fitnesses, y, axis=0)
-    else:
-        return new_fitnesses
 
 
-# 8th June, 2019.  *** 8th Mutation, 9th PSO + mutation, 10th PSO.
-# Revised 10th Oct, 2019 *** final version for OREA.
-def domination_based_ordinal_values(pf_index, archive_fitness, pf_upperbound, pf_lowerbound,
-                                    n_levels, overfitting_coeff=0.01, b_print=False):
+def domination_based_ordinal_values(pf_index, archive_fitness, pf_upperbound, pf_lowerbound, n_levels, overfitting_coeff=0.03, b_print=False):
     start = time()
-    archive_size, n_objs = len(archive_fitness), len(archive_fitness[0])
+    archive_size, n_objs = np.shape(archive_fitness)
     label = np.zeros(archive_size)
     cut_row = None  # a variable will be used in the second branch below, if the program enter the first branch, then this variable will always be None.
     # if all non-dominated solutions have the same objective values (Leading to a situation in which only one point exists in Pareto Front)
     if ((archive_fitness[pf_index] - pf_lowerbound) == 0).all():
-        labeled_index_for_pf = [index for index in range(len(pf_index))]
+        labeled_index_in_pf = range(len(pf_index))
         label[pf_index] = 1.0
 
         archive_fitness_0 = archive_fitness - pf_lowerbound
@@ -39,7 +24,7 @@ def domination_based_ordinal_values(pf_index, archive_fitness, pf_upperbound, pf
         if b_print:
             print("special case, only one point in current Pareto Front:", np.shape(reference_point))
     else:
-        # check valid objs:
+        # --- check valid objs ---
         valid_objs = [index for index in range(n_objs) if pf_upperbound[index] != pf_lowerbound[index]]
         archive_fitness = archive_fitness[:, valid_objs]
         pf_upperbound = pf_upperbound[valid_objs]
@@ -48,46 +33,46 @@ def domination_based_ordinal_values(pf_index, archive_fitness, pf_upperbound, pf
         if b_print:
             print("valid_objs ", valid_objs)
 
-        # select non-bound points. Points close to boundaries are sensitive to domination.
-        labeled_index_for_pf = []
+        # --- select non-bound points. Points close to boundaries are sensitive to domination ---
+        labeled_index_in_pf = []
         archive_fitness_0 = archive_fitness - pf_lowerbound
-        while len(labeled_index_for_pf) < 2:
+        while len(labeled_index_in_pf) < 2:
             overfitting_bound = (pf_upperbound - pf_lowerbound) * overfitting_coeff
             for index_for_pf, index in enumerate(pf_index):
-                if label[index] == 0:
+                if label[index] == 0:  # unlabeled
                     status = archive_fitness_0[index] > overfitting_bound
                     if status.all():
-                        labeled_index_for_pf.append(index_for_pf)
                         label[index] = 1.0
+                        labeled_index_in_pf.append(index_for_pf)
             overfitting_coeff -= 0.01
-        reference_point = archive_fitness_0[pf_index[labeled_index_for_pf]]
+        reference_point = archive_fitness_0[pf_index[labeled_index_in_pf]]
 
-        # shape the bounds
-        shape_index_for_rp = []
-        shape_reference = np.zeros((n_objs, n_objs))
+        # --- shape the bounds ---
+        shape_index_in_rp = []  # indexes of reference points to be deleted.
+        shape_reference = np.zeros((n_objs, n_objs))  # replacements of deleted reference points.
         cut_row = np.zeros((n_objs))
         for i in range(n_objs):
             max_index_for_rp = np.argmax(reference_point[:, i])
             max_value = reference_point[max_index_for_rp, i]
-            shape_index_for_rp.append(max_index_for_rp)
+            shape_index_in_rp.append(max_index_for_rp)
             shape_reference[i][i] = max_value
             cut_row[i] = max_value
-        shape_index_for_rp = list(set(shape_index_for_rp))
-        reference_point = np.delete(reference_point, shape_index_for_rp, axis=0)
+        shape_index_in_rp = list(set(shape_index_in_rp))
+        reference_point = np.delete(reference_point, shape_index_in_rp, axis=0)
 
-        # include bound pf points which inside the new shape.
+        # --- include bound pf points which inside the new shape ---
         for index_for_pf, index in enumerate(pf_index):
             if label[index] == 0 and min(np.max(shape_reference - archive_fitness_0[index], axis=1)) > 0:
-                labeled_index_for_pf.append(index_for_pf)
                 label[index] = 1.0
+                labeled_index_in_pf.append(index_for_pf)
 
                 reference_point = np.append(reference_point, archive_fitness_0[index].reshape(1, -1), axis=0)
         reference_point = np.append(reference_point, shape_reference, axis=0)
         if b_print:
             print("rp_upper_bound:", cut_row+pf_lowerbound)
 
-    # Already labeled reference points, now prepare for labeling rest samples:
-    rp_count = len(labeled_index_for_pf)
+    # --- Already labeled reference points, now prepare for labeling rest samples ---
+    rp_count = len(labeled_index_in_pf)
     rp_ratio = rp_count * 1.0 / archive_size
     if b_print:
         print("the number of shaped reference points: %d".format(rp_count))
@@ -130,8 +115,8 @@ def domination_based_ordinal_values(pf_index, archive_fitness, pf_upperbound, pf
         print(label[-2:], "time for labeling operation: %.5f" % (time()-start))
 
     #print("the number of ordinal levels %d." % n_levels)
-    #print("indexes of reference points for current pf: ", labeled_index_for_pf)
-    return label, n_levels, reference_point, labeled_index_for_pf
+    #print("indexes of reference points for current pf: ", labeled_index_in_pf)
+    return label, n_levels, reference_point, labeled_index_in_pf
 
 
 
