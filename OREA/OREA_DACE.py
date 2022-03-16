@@ -94,7 +94,7 @@ class OREA:
         self.archive_size = 0
         self.theta = np.zeros((2*self.n_vars))  # parameters of the ordinal regression surrogates
         self.surrogate = None
-        self.nadir_upperbound = None  # upperbound of Y.
+        self.Y_upperbound = None  # upperbound of Y.
         # --- --- non-dominated solution variables --- ---
         self.pf_index = None  # the indexes of pareto set solutions in the archive.
         self.ps = None  # current ps (non-dominated solutions in the decision space)
@@ -103,7 +103,7 @@ class OREA:
         self.new_point = None
         self.new_objs = None
 
-        self.objective_range = None  # self.nadir_upperbound - self.pf_lowerbound
+        self.objective_range = None  # self.Y_upperbound - self.pf_lowerbound
         self.normalized_pf = None
         self.pf_changed = self.range_changed =  None  # update flags
         self.miss_counter = 0
@@ -132,7 +132,7 @@ class OREA:
         self.surrogate = DACE(regr=regr_constant, corr=corr_gauss2, theta=self.theta,
                               thetaL=np.append(np.ones(self.n_vars) * self.coe_range[0], np.ones(self.n_vars) * self.exp_range[0]),
                               thetaU=np.append(np.ones(self.n_vars) * self.coe_range[1], np.ones(self.n_vars) * self.exp_range[1]))
-        self.nadir_upperbound = np.max(self.Y, axis=0)
+        self.Y_upperbound = np.max(self.Y, axis=0)
         # --- pareto front variables ---
         self.pf_lowerbound = np.ones((self.n_objs,)) * float('inf')
         self.pf_index = np.zeros(1, dtype=int)
@@ -141,7 +141,7 @@ class OREA:
         print("Initialization of non-dominated solutions:", np.shape(self.ps))
         print("Initial Pareto Front:")
         print(self.pf)
-        self.objective_range = self.nadir_upperbound - self.pf_lowerbound
+        self.objective_range = self.Y_upperbound - self.pf_lowerbound
         self.objective_range[self.objective_range == 0] += 0.0001  # avoid NaN caused by dividing zero.
         print("Objective range:", self.objective_range)
         self.normalized_pf = (self.pf - self.pf_lowerbound) / self.objective_range  
@@ -215,10 +215,10 @@ class OREA:
                 self.pf_index = np.append(self.pf_index, index)
                 self.pf_changed = True
                 return np.append(ps, x, axis=0), np.append(pf, y, axis=0)
-        # --- update nadir objective vector (upperbound) ---
+        # --- update Y upperbound ---
         for obj in range(self.n_objs):
-            if self.nadir_upperbound[obj] < y[0][obj]:
-                self.nadir_upperbound[obj] = y[0][obj]
+            if self.Y_upperbound[obj] < y[0][obj]:
+                self.Y_upperbound[obj] = y[0][obj]
                 self.range_changed = True
         # exclude solutions (which are dominated by new point x) from the current PS. # *** move to if condition below? only new ps point can exclude older ones.
         index_newPs_in_ps = [index for index in range(len(ps)) if min(diff[index]) < 0]
@@ -436,7 +436,7 @@ class OREA:
 
         # update three bounds for pf, and also update normalized pf
         if self.range_changed:
-            self.objective_range = self.nadir_upperbound-self.pf_lowerbound
+            self.objective_range = self.Y_upperbound-self.pf_lowerbound
             self.objective_range[self.objective_range == 0] =+ 0.0001
 
         if self.pf_changed:
