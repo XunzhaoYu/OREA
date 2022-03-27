@@ -1,5 +1,6 @@
 # -*- coding: UTF-8 -*-
 import numpy as np
+from copy import deepcopy
 
 
 """ Written by Xun-Zhao Yu (yuxunzhao@gmail.com). Last update: 2022-Mar-01.
@@ -28,7 +29,7 @@ class Polynomial:
         boundary = np.tile((upperbound - lowerbound), (n_samples, 1))
         upperbound = np.tile(upperbound, (n_samples, 1))
         lowerbound = np.tile(lowerbound, (n_samples, 1))
-        offspring = population[:]
+        offspring = deepcopy(population)
 
         rand_mutation = np.random.rand(n_samples, n_vars)
         rand_beta = np.random.rand(n_samples, n_vars)

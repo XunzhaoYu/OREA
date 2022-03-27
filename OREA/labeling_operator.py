@@ -75,7 +75,7 @@ def domination_based_ordinal_values(pf_index, archive_fitness, pf_upperbound, pf
     rp_count = len(labeled_index_in_pf)
     rp_ratio = rp_count * 1.0 / archive_size
     if b_print:
-        print("the number of shaped reference points: %d".format(rp_count))
+        print("the number of shaped reference points: {:d}".format(rp_count))
         
     n_levels = max(int(np.ceil(1.0/rp_ratio)), n_levels)
     coeff = np.zeros((n_levels))
@@ -88,7 +88,7 @@ def domination_based_ordinal_values(pf_index, archive_fitness, pf_upperbound, pf
     coeff_t = 1.0
     coeff[0] = coeff_t
     if b_print:
-        print("%d: labeled ratio: %.3f < %.3f < %.3f. coff: %.3f, value: %.3f" % (1, 0.0, rp_ratio, ratio_bound, 1.0, value))
+        print("{:d}: labeled ratio: {:.3f} < {:.3f} < {:.3f}. coff: {:.3f}, value: {:.3f}".format(1, 0.0, rp_ratio, ratio_bound, 1.0, value))
     rest_index = np.array([i for i in range(archive_size) if label[i] == 0])
     rest_fitness = archive_fitness_0[rest_index]
     rp_coeff = np.zeros((len(rest_index)))
@@ -109,10 +109,10 @@ def domination_based_ordinal_values(pf_index, archive_fitness, pf_upperbound, pf
         label[labeling_indexes] = value
         coeff[c] = rp_coeff[rp_coeff_order[ratio]]
         if b_print:
-            print("%d: labeled ratio: %.3f to %.3f. coff: %.3f, value: %.3f" % (c+1, (start_index+rp_count)*1.0/archive_size, (ratio+rp_count)*1.0/archive_size, coeff[c], value))
+            print("{:d}: labeled ratio: {:.3f} to {:.3f}. coff: {:.3f}, value: {:.3f}".format(c+1, (start_index+rp_count)*1.0/archive_size, (ratio+rp_count)*1.0/archive_size, coeff[c], value))
         start_index = ratio
     if b_print:
-        print(label[-2:], "time for labeling operation: %.5f" % (time()-start))
+        print(label[-2:], "time for labeling operation: {:.5f}".format(time()-start))
 
     #print("the number of ordinal levels %d." % n_levels)
     #print("indexes of reference points for current pf: ", labeled_index_in_pf)

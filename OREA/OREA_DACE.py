@@ -129,7 +129,7 @@ class OREA:
         self.X, self.Y = self._archive_init()
         self.archive_size = len(self.X)
         self.theta = np.append(np.ones(self.n_vars) * np.mean(self.coe_range), np.ones(self.n_vars) * np.mean(self.exp_range))
-        self.surrogate = DACE(regr=regr_constant, corr=corr_gauss2, theta=self.theta,
+        self.surrogate = DACE(regr=regr_quadratic, corr=corr_gauss2, theta=self.theta,
                               thetaL=np.append(np.ones(self.n_vars) * self.coe_range[0], np.ones(self.n_vars) * self.exp_range[0]),
                               thetaU=np.append(np.ones(self.n_vars) * self.coe_range[1], np.ones(self.n_vars) * self.exp_range[1]))
         self.Y_upperbound = np.max(self.Y, axis=0)
@@ -270,92 +270,15 @@ class OREA:
 
             print(" --- Reproduction: searching for minimal negative EI... --- ")
             self.new_point = np.zeros((self.n_reproduction, self.n_vars))
+            self._update_reference()
+
             if len(self.pf_index) == 1:
                 for i in range(self.n_reproduction):
                     self.new_point[i] = self._reproduce_by_one_mutation(self.X[self.pf_index[0]], times_per_gene=self.n_variants)
             else:
-                new_point_pre = self._reproduce_by_PSO(self.n_gen_reproduction)
-                self.new_point[0] = new_point_pre[0]
+                self.new_point[0] = self._generation_based_reproduction()
+                self.new_point[1] = self._individual_based_reproduction()
 
-                print(" --- --- IndReproduction: mating 1: --- --- ")
-                if self.pf_changed:
-                    self._get_region_ID(self.normalized_pf)
-                    print("region id of non-dominated solutions:", self.region_id)
-                    # --- record indexes of the regions which contain level0 points (reference points) ---
-                    # --- 记录拥有reference points的区域的下标 ---
-                    self.rp_region_set = np.array(list(set(self.region_id[self.rp_index_in_pf])))
-                    print("region id set of reference points:", self.rp_region_set)
-                    # --- count how many non-dominated solutions exist in each region ---
-                    # --- 计算每个区域有几个non-dominated的解 ---
-                    self.region_counter = np.zeros((self.n_vectors), dtype=int)
-                    for i in range(len(self.region_id)):
-                        self.region_counter[self.region_id[i]] += 1
-                    # --- delete regions without non-dominated points: all region indexes -> non_empty_region_indexes ---
-                    # --- 删除没有non-dominated solution的区域下标，只留下非空的区域的下标 ---
-                    n_points_order = np.argsort(self.region_counter)  # rank: min -> max
-                    min_n_points, min_n_index = 0, 0
-                    for index, rank in enumerate(n_points_order):
-                        if self.region_counter[rank] > 0:
-                            min_n_points = self.region_counter[rank]  # the minimal number of non-dominated solutions in a non_empty_region
-                            min_n_index = index
-                            break
-                    self.non_empty_region_set = n_points_order[min_n_index:]
-                    # --- select regions with the least non-dominated points: non_empty_region_set -> candidate_region_set ---
-                    # --- 选择拥有最少的non-dominated solutions的区域做为候选区域 ---
-                    self.candidate_region_set = []
-                    for region_index in self.non_empty_region_set:
-                        if self.region_counter[region_index] > min_n_points:
-                            break
-                        self.candidate_region_set.append(region_index)
-
-                # --- randomly pick a candidate region as the target region in this iteration ---
-                # --- 从候选区域中随机选取一个做为本轮的目标区域 ---
-                target_region = np.random.choice(self.candidate_region_set, 1)[0]
-                print("target region:", target_region, "from candidate region set", self.candidate_region_set, ". reference vector:", self.vectors[target_region])
-                # --- select non-dominated solution(s) with maximal label value in the target region ---
-                # --- 从目标区域选择一个最大label值的解 ---
-                target_pf_index_in_pf = [s for s in range(len(self.region_id)) if self.region_id[s] == target_region]
-                target_pf_index = self.pf_index[target_pf_index_in_pf]   # non-dominated solution indexes in the target region: index in archive
-                print("indexes of non-dominated solutions in the target region:", target_pf_index)
-                max_value = np.max(self.label[target_pf_index])
-                candidate_indexes = [ind for ind in target_pf_index_in_pf if self.label[self.pf_index[ind]] == max_value]  # index in pf_index
-                if len(candidate_indexes) == 1:
-                    mating1_index = self.pf_index[candidate_indexes[0]]
-                else:  # --- select based on crowd --- 如果很多解都有最大label值，则根据解的稀疏程度选取一个
-                    candidate_distance = spatial.distance.cdist(self.normalized_pf[candidate_indexes], self.normalized_pf[candidate_indexes])
-                    candidate_distance += np.eye(len(candidate_indexes)) * 2 * np.amax(candidate_distance)
-                    mating1_index = self.pf_index[candidate_indexes[np.argmax(np.min(candidate_distance, axis=1), axis=0)]]
-
-                mating_population = np.zeros((2, self.n_vars))
-                mating_population[0] = self.X[mating1_index]
-                print("mating 1:", mating1_index, mating_population[0], self.Y[mating1_index])
-
-                print(" --- --- IndReproduction: mating 2: --- --- ")
-                random_region = target_region
-                random_candidate_indexes = []
-                # --- if all reference points are located in the target region ---
-                # --- 假如 reference points 全在 target 区域 ---
-                if len(self.rp_region_set) == 1 and self.rp_region_set[0] == target_region:
-                    random_region = np.random.choice(self.candidate_region_set, 1)[0]
-                    for i, id in enumerate(self.region_id):
-                        if id == random_region:
-                            random_candidate_indexes.append(self.pf_index[i])
-                else:  # --- select a random region (not the target one) ---
-                    while random_region == target_region:
-                        random_region = np.random.choice(self.rp_region_set, 1)[0]
-                    for i, id in enumerate(self.region_id[self.rp_index_in_pf]):
-                        if id == random_region:
-                            random_candidate_indexes.append(self.pf_index[self.rp_index_in_pf[i]])
-                print("random region:", random_region, "RP indexes in random region", random_candidate_indexes)
-                mating2_index = np.random.choice(random_candidate_indexes, 1)[0]
-                mating_population[1] = self.X[mating2_index]
-                print("mating 2:", mating2_index, mating_population[1], self.Y[mating2_index])
-
-                local_origin = self.crossover_op.execute(mating_population, self.upperbound, self.lowerbound)
-                local_origin = local_origin[0] if np.random.rand() < 0.5 else local_origin[1]
-                self.new_point[1] = self._reproduce_by_one_mutation(local_origin, times_per_gene=self.n_variants)
-
-            # end of selection process.
             self.new_objs = self._population_evaluation(self.new_point, True, self.upperbound, self.lowerbound)
             print(" --- Evaluate on fitness function... ---")
             print("new point:", self.new_point)
@@ -367,6 +290,43 @@ class OREA:
 
             # after used to initialize the kriging model, the archive then used to save Pareto optimal solutions
             self._progress_update()
+
+    def _update_reference(self):
+        if self.pf_changed:
+            self._get_region_ID(self.normalized_pf)
+            print("region id of non-dominated solutions:", self.region_id)
+            # --- record indexes of the regions which contain level0 points (reference points) ---
+            # --- 记录拥有reference points的区域的下标 ---
+            self.rp_region_set = np.array(list(set(self.region_id[self.rp_index_in_pf])))
+            print("region id set of reference points:", self.rp_region_set)
+            # --- count how many non-dominated solutions exist in each region ---
+            # --- 计算每个区域有几个non-dominated的解 ---
+            self.region_counter = np.zeros((self.n_vectors), dtype=int)
+            for i in range(len(self.region_id)):
+                self.region_counter[self.region_id[i]] += 1
+            print(self.region_counter)
+
+            # --- delete regions without non-dominated points: all region indexes -> non_empty_region_indexes ---
+            # --- 删除没有non-dominated solution的区域下标，只留下非空的区域的下标 ---
+            n_points_order = np.argsort(self.region_counter)  # rank: min -> max
+            min_n_points, min_n_index = 0, 0
+            for index, rank in enumerate(n_points_order):
+                if self.region_counter[rank] > 0:
+                    min_n_points = self.region_counter[rank]  # the minimal number of non-dominated solutions in a non_empty_region
+                    min_n_index = index
+                    break
+            self.non_empty_region_set = n_points_order[min_n_index:]
+            # --- select regions with the least non-dominated points: non_empty_region_set -> candidate_region_set ---
+            # --- 选择拥有最少的non-dominated solutions的区域做为候选区域 ---
+            self.candidate_region_set = []
+            for region_index in self.non_empty_region_set:
+                if self.region_counter[region_index] > min_n_points:
+                    break
+                self.candidate_region_set.append(region_index)
+
+    def _generation_based_reproduction(self):
+        new_point_pre = self._reproduce_by_PSO(self.n_gen_reproduction)
+        return new_point_pre[0]
 
     def _reproduce_by_PSO(self, n_selected_population=1):
         ea = PSO(Random())
@@ -385,6 +345,55 @@ class OREA:
         for i, ind in enumerate(final_pop[:n_selected_population]):
             selected_population[i] = ind.candidate
         return selected_population
+
+    def _individual_based_reproduction(self):
+        print(" --- --- IndReproduction: mating 1: --- --- ")
+        # --- randomly pick a candidate region as the target region in this iteration ---
+        # --- 从候选区域中随机选取一个做为本轮的目标区域 ---
+        target_region = np.random.choice(self.candidate_region_set, 1)[0]
+        print("target region:", target_region, "from candidate region set", self.candidate_region_set, ". reference vector:", self.vectors[target_region])
+        # --- select non-dominated solution(s) with maximal label value in the target region ---
+        # --- 从目标区域选择一个最大label值的解 ---
+        target_pf_index_in_pf = [s for s in range(len(self.region_id)) if self.region_id[s] == target_region]
+        target_pf_index = self.pf_index[target_pf_index_in_pf]  # non-dominated solution indexes in the target region: index in archive
+        print("indexes of non-dominated solutions in the target region:", target_pf_index)
+        max_value = np.max(self.label[target_pf_index])
+        candidate_indexes = [ind for ind in target_pf_index_in_pf if self.label[self.pf_index[ind]] == max_value]  # index in pf_index
+        if len(candidate_indexes) == 1:
+            mating1_index = self.pf_index[candidate_indexes[0]]
+        else:  # --- select based on crowd --- 如果很多解都有最大label值，则根据解的稀疏程度选取一个
+            candidate_distance = spatial.distance.cdist(self.normalized_pf[candidate_indexes], self.normalized_pf[candidate_indexes])
+            candidate_distance += np.eye(len(candidate_indexes)) * 2 * np.amax(candidate_distance)
+            mating1_index = self.pf_index[candidate_indexes[np.argmax(np.min(candidate_distance, axis=1), axis=0)]]
+
+        mating_population = np.zeros((2, self.n_vars))
+        mating_population[0] = self.X[mating1_index]
+        print("mating 1:", mating1_index, mating_population[0], self.Y[mating1_index])
+
+        print(" --- --- IndReproduction: mating 2: --- --- ")
+        random_region = target_region
+        random_candidate_indexes = []
+        # --- if all reference points are located in the target region ---
+        # --- 假如 reference points 全在 target 区域 ---
+        if len(self.rp_region_set) == 1 and self.rp_region_set[0] == target_region:
+            random_region = np.random.choice(self.candidate_region_set, 1)[0]
+            for i, id in enumerate(self.region_id):
+                if id == random_region:
+                    random_candidate_indexes.append(self.pf_index[i])
+        else:  # --- select a random region (not the target one) ---
+            while random_region == target_region:
+                random_region = np.random.choice(self.rp_region_set, 1)[0]
+            for i, id in enumerate(self.region_id[self.rp_index_in_pf]):
+                if id == random_region:
+                    random_candidate_indexes.append(self.pf_index[self.rp_index_in_pf[i]])
+        print("random region:", random_region, "RP indexes in random region", random_candidate_indexes)
+        mating2_index = np.random.choice(random_candidate_indexes, 1)[0]
+        mating_population[1] = self.X[mating2_index]
+        print("mating 2:", mating2_index, mating_population[1], self.Y[mating2_index])
+
+        local_origin = self.crossover_op.execute(mating_population, self.upperbound, self.lowerbound)
+        local_origin = local_origin[0] if np.random.rand() < 0.5 else local_origin[1]
+        return self._reproduce_by_one_mutation(local_origin, times_per_gene=self.n_variants)
 
     def _reproduce_by_one_mutation(self, origin, times_per_gene=100):
         neg_ei = np.zeros((self.n_vars * times_per_gene))
@@ -457,5 +466,5 @@ class OREA:
         path = self.config['path_save'] + self.name + "/Total(" + str(self.n_vars) + "," + str(self.n_objs) + ")/" + \
                str(self.evaluation_max) + "_" + self.iteration + " igd " + str(np.around(self.performance[1], decimals=4)) + ".xlsx"
         self.recorder.save(path)
-        return self.ps, self.performance[0]
+        return self.ps, self.performance[1]
 

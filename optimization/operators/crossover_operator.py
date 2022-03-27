@@ -1,5 +1,6 @@
 # -*- coding: UTF-8 -*-
 import numpy as np
+from copy import deepcopy
 
 
 """ Written by Xun-Zhao Yu (yuxunzhao@gmail.com). Last update: 2022-Mar-01.
@@ -21,6 +22,7 @@ class SBX:
         :param lowerbound: The lower bound of decision variables. Type: array. Shape: (n_vars)
         :return: offspring. Type: 2darray. Shape: (n_samples, n_vars)
         """
+        parents = deepcopy(parents)
         n_samples, n_vars = np.shape(parents)
         if n_samples % 2 != 0:
             print("The number of parents should be an even number.")
