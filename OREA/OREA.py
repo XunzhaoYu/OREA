@@ -1,12 +1,13 @@
 # -*- coding: UTF-8 -*-
 # --- basic libraries ---
 import numpy as np
-from scipy import spatial
-import xlrd
 from time import time
 from copy import deepcopy
+from scipy import spatial
 # --- surrogate modeling ---
-from models.Kriging import *
+from models.pydacefit.dace import *
+from models.pydacefit.regr import *
+from models.pydacefit.corr import *
 # --- OREA ---
 from OREA.reference_vector import generate_vectors
 from OREA.labeling_operator import domination_based_ordinal_values
@@ -14,24 +15,22 @@ from OREA.labeling_operator import domination_based_ordinal_values
 from optimization.operators.crossover_operator import *
 from optimization.operators.mutation_operator import *
 #from optimization.operators.selection_operator import *
-from optimization.PSO import *
 from optimization.EI import *
 from optimization.performance_indicators import *
 # --- tools ---
 from tools.recorder import *
+from tools.loader import *
 
-""" Written by Xun-Zhao Yu (yuxunzhao@gmail.com). Last update: 2022-Mar-15.
-SSCI version OREA, use Kriging (not DACEfit).
-
+""" Written by Xun-Zhao Yu (yuxunzhao@gmail.com). Last update: 2022-June-15.
 X. Yu, X. Yao, Y. Wang, L. Zhu, and D. Filev, “Domination-based ordinal regression for expensive multi-objective optimization,” 
 in Proceedings of the 2019 IEEE Symposium Series on Computational Intelligence (SSCI’19), 2019, pp. 2058–2065.
 """
 
 
 class OREA:
-    def __init__(self, config, name, dataset, pf, init_path=None):
+    def __init__(self, config, name, dataset, pf, b_default_path=True):
         self.config = deepcopy(config)
-        self.init_path = init_path
+        self.DEFAULT_PATH = b_default_path
         # --- problem setups ---
         self.name = name
         self.n_vars = self.config['x_dim']
@@ -44,22 +43,22 @@ class OREA:
         self.indicator_IGD = inverted_generational_distance(reference_front=self.true_pf)
 
         # --- surrogate setups ---
-        self.n_levels = self.config['n_levels']
-        self.overfitting_coe = self.config['overfitting_coe']
-        self.model_training_evaluation_init = self.config['model_training_evaluation_init']
-        self.model_training_evaluation = self.config['model_training_evaluation']
+        self.N_LEVELS = self.config['n_levels']
+        self.OVERFITTING_COE = self.config['overfitting_coe']
+        self.DACE_TRAINING_ITERATION_INIT = self.config['dace_training_iteration_init']
+        self.DACE_TRAINING_ITERATION = self.config['dace_training_iteration']
+        self.COE_RANGE = self.config['coe_range']
+        self.EXP_RANGE = self.config['exp_range']
 
         # --- optimization algorithm setups ---
-        self.evaluation_init = self.config['evaluation_init']
-        self.evaluation_max = self.config['evaluation_max']
-
-        self.n_reproduction = 2
-        self.n_gen_reproduction = 1
-        self.search_evaluation_max = self.config['search_evaluation_max']
-        self.pop_size = self.config['population_size']
-        self.neighborhood_size = self.config['neighborhood_size']
-        self.n_variants = self.config['n_variants']
-
+        self.EVALUATION_INIT = self.config['evaluation_init']
+        self.EVALUATION_MAX = self.config['evaluation_max']
+        # --- --- reproduction configuration  --- ---
+        self.N_REPRODUCTION = 2
+        self.SEARCH_EVALUATION_MAX = self.config['search_evaluation_max']
+        self.POP_SIZE = self.config['population_size']
+        self.NEIGHBORHOOD_SIZE = self.config['neighborhood_size']
+        self.N_VARIANTS = self.config['n_variants']
         # --- --- reference vectors --- ---
         self.vectors = generate_vectors(self.n_objs, layer=3, h=2, h2=1)
         self.normalized_vs = self.vectors / np.sqrt(np.sum(np.power(self.vectors, 2), axis=1)).reshape(-1, 1)
@@ -85,6 +84,7 @@ class OREA:
         self.X = None
         self.Y = None
         self.archive_size = 0
+        self.theta = np.zeros((2*self.n_vars))  # parameters of the ordinal regression surrogates
         self.surrogate = None
         self.Y_upperbound = None  # upperbound of Y.
         # --- --- non-dominated solution variables --- ---
@@ -95,10 +95,9 @@ class OREA:
         self.new_point = None
         self.new_objs = None
 
-        self.objective_range = None  # self.Y_upperbound - self.pf_lowerbound
+        self.Y_range = None  # self.Y_upperbound - self.pf_lowerbound
         self.normalized_pf = None
-        self.pf_changed = self.range_changed = None  # update flags
-        self.miss_counter = 0
+        self.pf_changed = self.range_changed =  None  # update flags
         # --- labeling methods ---
         self.label = self.reference_point = self.rp_index_in_pf = None
         self.region_id = self.region_counter = None
@@ -120,26 +119,29 @@ class OREA:
         # --- --- archive and surrogate variables --- ---
         self.X, self.Y = self._archive_init()
         self.archive_size = len(self.X)
-        self.surrogate = Kriging(self.config, self.X)
+        self.theta = np.append(np.ones(self.n_vars), np.ones(self.n_vars))
+        self.surrogate = DACE(regr=regr_constant, corr=corr_gauss2, theta=self.theta,
+                              thetaL=np.append(np.ones(self.n_vars) * self.COE_RANGE[0], np.ones(self.n_vars) * self.EXP_RANGE[0]),
+                              thetaU=np.append(np.ones(self.n_vars) * self.COE_RANGE[1], np.ones(self.n_vars) * self.EXP_RANGE[1]))
         self.Y_upperbound = np.max(self.Y, axis=0)
+        self.pf_lowerbound = np.min(self.Y, axis=0)
         # --- pareto front variables ---
-        self.pf_lowerbound = np.ones((self.n_objs,)) * float('inf')
         self.pf_index = np.zeros(1, dtype=int)
         self.ps, self.pf = self.ps_init()
         self.pf_upperbound = np.max(self.pf, axis=0)
         print("Initialization of non-dominated solutions:", np.shape(self.ps))
         print("Initial Pareto Front:")
         print(self.pf)
-        self.objective_range = self.Y_upperbound - self.pf_lowerbound
-        self.objective_range[self.objective_range == 0] += 0.0001  # avoid NaN caused by dividing zero.
-        print("Objective range:", self.objective_range)
-        self.normalized_pf = (self.pf - self.pf_lowerbound) / self.objective_range
+        self.Y_range = self.Y_upperbound - self.pf_lowerbound
+        self.Y_range[self.Y_range == 0] += 0.0001  # avoid NaN caused by dividing zero.
+        print("Objective range:", self.Y_range)
+        self.normalized_pf = (self.pf - self.pf_lowerbound) / self.Y_range  
         # --- --- update flags --- ---
         self.pf_changed = True
         self.range_changed = True
-        self.miss_counter = 0.0
+
         # --- labeling methods ---
-        self.label = None  # np.zeros((1, self.archive_size))
+        self.label = None  #np.zeros((1, self.archive_size))
         self.reference_point = np.zeros((1, self.n_objs))
         self.rp_index_in_pf = []  # indexes in pf.
 
@@ -154,34 +156,25 @@ class OREA:
         print("Initial IGD+ value: {:.4f}, IGD value: {:.4f}.".format(self.performance[0], self.performance[1]))
         self.recorder = Recorder(self.name)
         self.recorder.init(self.X, self.Y, self.performance, ['IGD+', 'IGD'])
-        if self.init_path is None:
-            path = self.config['path_save'] + self.name + "/Initial(" + str(self.n_vars) + "," + str(self.n_objs) + ")/" + \
-                   str(self.evaluation_init) + "_" + self.iteration + ".xlsx"
+        if self.DEFAULT_PATH is False:
+            path = str(self.EVALUATION_INIT) + "_" + self.iteration + ".xlsx"
             self.recorder.save(path)
 
     # Invoked by self.variable_init()
     def _archive_init(self):
         """
         Modify this method to initialize your 'self.X'.
-        :return X: initial samples. Type: 2darray. Shape: (self.evaluation_init, self.n_vars)
-        :return Y: initial fitness. Type: 2darray. Shape: (self.evaluation_init, self.n_objs)
+        :return X: initial samples. Type: 2darray. Shape: (self.EVALUATION_INIT, self.n_vars)
+        :return Y: initial fitness. Type: 2darray. Shape: (self.EVALUATION_INIT, self.n_objs)
         """
-        if self.init_path is None:
-            X, Y = self.dataset.sample(n_samples=self.evaluation_init)
+        if self.DEFAULT_PATH is False:
+            X, Y = self.dataset.sample(n_samples=self.EVALUATION_INIT)
+            return X, Y
         else:  # load pre-sampled dataset
-            path = self.init_path + self.name + "/Initial(" + str(self.n_vars) + "," + str(self.n_objs) + ")/" + \
-                   str(self.evaluation_init) + "_" + self.iteration + ".xlsx"
-            src_file = xlrd.open_workbook(path)
-            src_sheets = src_file.sheets()
-            src_sheet = src_sheets[0]
-            X = np.zeros((self.evaluation_init, self.n_vars), dtype=float)
-            Y = np.zeros((self.evaluation_init, self.n_objs), dtype=float)
-            for index in range(self.evaluation_init):
-                row_data = src_sheet.row_values(index + 1)
-                X[index] = row_data[1:1 + self.n_vars]
-                Y[index] = row_data[1 + self.n_vars:1 + self.n_vars + self.n_objs]
-            Y = np.around(Y, decimals=4)
-        return X, Y
+            path = self.config['path_save'] + self.name + \
+                   "/Initial(" + str(self.n_vars) + "," + str(self.n_objs) + ")/" + \
+                   str(self.EVALUATION_INIT) + "_" + self.iteration + ".xlsx"
+            return load_XY(path, self.n_vars, self.n_objs, self.EVALUATION_INIT)
 
     """
     Pareto Set/Front methods
@@ -222,10 +215,8 @@ class OREA:
                 if self.pf_lowerbound[obj] > y[0][obj]:
                     self.pf_lowerbound[obj] = y[0][obj]
                     self.range_changed = True
-            self.miss_counter = 0.0
             return np.append(new_ps, x, axis=0), np.append(new_pf, y, axis=0)
         else:
-            self.miss_counter += 1.0
             return new_ps, new_pf
 
     """
@@ -233,7 +224,7 @@ class OREA:
     """
     def _population_evaluation(self, population, is_normalized_data=False, upperbound=None, lowerbound=None):
         if is_normalized_data:
-            population = population * (upperbound - lowerbound) + lowerbound
+            population = population*(upperbound-lowerbound)+lowerbound
         fitnesses = self.dataset.evaluate(population)
         return np.around(fitnesses, decimals=4)
 
@@ -242,25 +233,33 @@ class OREA:
     """
     def run(self, current_iteration):
         self.variable_init(current_iteration)
-        while self.archive_size < self.evaluation_max:
+        current_n_levels = self.N_LEVELS
+        while self.archive_size < self.EVALUATION_MAX:
             print(" ")
             print(" --- Labeling and Training Kriging model... --- ")
             self.label = np.zeros(self.archive_size)
-            last_n_levels = self.n_levels
-            self.label, self.n_levels, self.reference_point, self.rp_index_in_pf = domination_based_ordinal_values(
-                self.pf_index, self.Y, self.pf_upperbound, self.pf_lowerbound, self.n_levels, overfitting_coeff=self.overfitting_coe, b_print=False)
-            if self.n_levels == last_n_levels:
-                self.surrogate.train(self.label, predefine=False, max_evaluation=self.model_training_evaluation)
+            last_n_levels = current_n_levels
+            if len(self.pf_index) == self.archive_size:  # if all solutions are non-dominated:
+                self.label = np.ones(self.archive_size)
+                current_n_levels = 1
+                self.rp_index_in_pf = np.arange(0, self.archive_size)
             else:
-                self.surrogate.train(self.label, predefine=False, max_evaluation=self.model_training_evaluation_init)
+                self.label, current_n_levels, self.rp_index_in_pf = domination_based_ordinal_values(
+                    self.pf_index, self.Y, self.pf_upperbound, self.pf_lowerbound, n_levels=self.N_LEVELS, overfitting_coeff=self.OVERFITTING_COE, b_print=False)
+            if current_n_levels == last_n_levels:
+                self.surrogate.fit(self.X, self.label, self.DACE_TRAINING_ITERATION)
+            else:
+                self.surrogate.fit(self.X, self.label, self.DACE_TRAINING_ITERATION_INIT)
+            self.theta = self.surrogate.model["theta"]
+            print("updated theta:", self.theta)
 
             print(" --- Reproduction: searching for minimal negative EI... --- ")
-            self.new_point = np.zeros((self.n_reproduction, self.n_vars))
+            self.new_point = np.zeros((self.N_REPRODUCTION, self.n_vars))
             self._update_reference()
 
             if len(self.pf_index) == 1:
-                for i in range(self.n_reproduction):
-                    self.new_point[i] = self._reproduce_by_one_mutation(self.X[self.pf_index[0]], times_per_gene=self.n_variants)
+                for i in range(self.N_REPRODUCTION):
+                    self.new_point[i] = self._reproduce_by_one_mutation(self.X[self.pf_index[0]], times_per_gene=self.N_VARIANTS)
             else:
                 self.new_point[0] = self._generation_based_reproduction()
                 self.new_point[1] = self._individual_based_reproduction()
@@ -272,14 +271,7 @@ class OREA:
             # --- update archive, archive_fitness, distance in model ---
             self.X = np.append(self.X, self.new_point, axis=0)
             self.Y = np.append(self.Y, self.new_objs, axis=0)
-            for new_data in self.new_point:
-                distance_row = np.zeros((1, self.archive_size, self.n_vars))
-                for i in range(self.archive_size):
-                    distance_row[0, i] = abs(self.X[i, :] - new_data)
-                self.surrogate.update_distance_incrementally(distance_row)
-                self.archive_size += 1
-
-            # after used to initialize the kriging model, the archive then used to save Pareto optimal solutions
+            self.archive_size += self.N_REPRODUCTION
             self._progress_update()
 
     def _update_reference(self):
@@ -316,26 +308,53 @@ class OREA:
                 self.candidate_region_set.append(region_index)
 
     def _generation_based_reproduction(self):
-        new_point_pre = self._reproduce_by_PSO(self.n_gen_reproduction)
-        return new_point_pre[0]
+        return self._reproduce_by_PSO()
 
-    def _reproduce_by_PSO(self, n_selected_population=1):
-        ea = PSO(Random())
-        ea.terminator = no_improvement_termination
-        ea.topology = inspyred.swarm.topologies.ring_topology
-        final_pop = ea.evolve(generator=generate_population,
-                              evaluator=self.cal_EI_for_inspyred,
-                              pop_size=self.pop_size,
-                              maximize=False,
-                              bounder=ec.Bounder(self.lowerbound, self.upperbound),
-                              max_evaluations=self.search_evaluation_max,
-                              neighborhood_size=self.neighborhood_size,
-                              num_inputs=self.n_vars)
-        final_pop.sort(reverse=True)  # minimal first when minimize, maximal first when maximize
-        selected_population = np.zeros((n_selected_population, self.n_vars))
-        for i, ind in enumerate(final_pop[:n_selected_population]):
-            selected_population[i] = ind.candidate
-        return selected_population
+    def _reproduce_by_PSO(self, inertia=0.5, cognitive_rate=1.5, social_rate=1.5):
+        # Initialization
+        pop = np.random.rand(self.POP_SIZE, self.n_vars) * (self.upperbound - self.lowerbound) + self.lowerbound
+        fit = np.zeros(self.POP_SIZE)
+        for i in range(self.POP_SIZE):
+            fit[i] = self.cal_EI(pop[i])
+        n_evaluation = self.POP_SIZE
+
+        previous_pop = deepcopy(pop)
+        previous_best = deepcopy(pop)  # archive
+        previous_best_fit = deepcopy(fit)
+        neighbors = np.zeros((self.POP_SIZE, self.NEIGHBORHOOD_SIZE))
+        half_hood = self.NEIGHBORHOOD_SIZE // 2
+        for i in range(self.POP_SIZE):
+            neighbors[i] = (np.array(range(self.NEIGHBORHOOD_SIZE)) - half_hood + self.POP_SIZE + i) % self.POP_SIZE
+        neighbors = neighbors.astype(int)
+
+        # Optimization:
+        next_pop = np.zeros((self.POP_SIZE, self.n_vars))
+        next_fit = np.zeros(self.POP_SIZE)
+        while n_evaluation < self.SEARCH_EVALUATION_MAX:
+            # Reproduction
+            for i in range(self.POP_SIZE):
+                neighbor_indexes = neighbors[i]
+                neighbor_best_index = neighbor_indexes[np.argmin(previous_best_fit[neighbor_indexes])]
+                neighbor_best = previous_best[neighbor_best_index]
+                next_pop[i] = pop[i] + \
+                              inertia * (pop[i] - previous_pop[i]) + \
+                              cognitive_rate * np.random.rand(self.n_vars) * (previous_best[i] - pop[i]) + \
+                              social_rate * np.random.rand(self.n_vars) * (neighbor_best - pop[i])
+            next_pop = np.minimum(np.maximum(next_pop, self.lowerbound), self.upperbound)
+            for i in range(self.POP_SIZE):
+                next_fit[i] = self.cal_EI(next_pop[i])
+            n_evaluation += self.POP_SIZE
+            # Environmental selection
+            previous_pop = deepcopy(pop)
+            for i in range(self.POP_SIZE):
+                if next_fit[i] < previous_best_fit[i]:
+                    previous_best[i] = next_pop[i].copy()
+                    previous_best_fit[i] = next_fit[i]
+            pop = deepcopy(next_pop)
+            fit = next_fit.copy()
+        order = np.argsort(fit)
+        pop = pop[order]
+        return pop[0]
 
     def _individual_based_reproduction(self):
         print(" --- --- IndReproduction: mating 1: --- --- ")
@@ -384,7 +403,7 @@ class OREA:
 
         local_origin = self.crossover_op.execute(mating_population, self.upperbound, self.lowerbound)
         local_origin = local_origin[0] if np.random.rand() < 0.5 else local_origin[1]
-        return self._reproduce_by_one_mutation(local_origin, times_per_gene=self.n_variants)
+        return self._reproduce_by_one_mutation(local_origin, times_per_gene=self.N_VARIANTS)
 
     def _reproduce_by_one_mutation(self, origin, times_per_gene=100):
         neg_ei = np.zeros((self.n_vars * times_per_gene))
@@ -395,16 +414,9 @@ class OREA:
             neg_ei[i] = self.cal_EI(mutant[i])
         return mutant[np.argmin(neg_ei)].copy()
 
-    def cal_EI_for_inspyred(self, candidates, args):
-        fitness = []
-        for ind in candidates:
-            f = self.cal_EI(ind)
-            fitness.append(f)
-        return fitness
-
     def cal_EI(self, x):  # minimize negative EI equivalent to maximize EI.
-        distance_x = np.abs(self.X - x)
-        mu_hat, sigma2_hat = self.surrogate.predict(distance_x)
+        x = np.array(x).reshape(1, -1)
+        mu_hat, sigma2_hat = self.surrogate.predict(x, return_mse=True)
         if sigma2_hat <= 0.:
             ei = mu_hat - 1.0
         else:  # cdf(z) = 1/2[1 + erf(z/sqrt(2))].
@@ -425,19 +437,19 @@ class OREA:
 
     def _progress_update(self):
         self.pf_changed, self.range_changed = False, False
-        for new_index in range(self.n_reproduction):
-            index = self.archive_size - self.n_reproduction + new_index
+        for new_index in range(self.N_REPRODUCTION):
+            index = self.archive_size - self.N_REPRODUCTION + new_index
             self.ps, self.pf = self.get_ps(self.ps, self.pf, np.array([self.new_point[new_index]]), np.array([self.new_objs[new_index]]), index)
             if self.pf_changed:
                 self.performance[0] = self.indicator_IGD_plus.compute(self.pf)
                 self.performance[1] = self.indicator_IGD.compute(self.pf)
-            self.recorder.write(index + 1, self.new_point[new_index], self.new_objs[new_index], self.performance)
+            self.recorder.write(index+1, self.new_point[new_index], self.new_objs[new_index], self.performance)
         print("update archive to keep all individuals non-dominated. ", np.shape(self.ps))
 
         # update three bounds for pf, and also update normalized pf
         if self.range_changed:
-            self.objective_range = self.Y_upperbound - self.pf_lowerbound
-            self.objective_range[self.objective_range == 0] = + 0.0001
+            self.Y_range = self.Y_upperbound-self.pf_lowerbound
+            self.Y_range[self.Y_range == 0] =+ 0.0001
 
         if self.pf_changed:
             print("current pf_index", self.pf_index)
@@ -446,7 +458,7 @@ class OREA:
             print("current pf upper bound:", self.pf_upperbound)
 
         if self.range_changed or self.pf_changed:
-            self.normalized_pf = (self.pf - self.pf_lowerbound) / self.objective_range
+            self.normalized_pf = (self.pf-self.pf_lowerbound)/self.Y_range
 
         # print results
         t = time() - self.time
@@ -454,8 +466,12 @@ class OREA:
         print("Current IGD+ value: {:.4f}, IGD value: {:.4f}.".format(self.performance[0], self.performance[1]))
 
     def get_result(self):
-        path = self.config['path_save'] + self.name + "/Total(" + str(self.n_vars) + "," + str(self.n_objs) + ")/" + \
-               str(self.evaluation_max) + "_" + self.iteration + " igd " + str(np.around(self.performance[1], decimals=4)) + ".xlsx"
+        if self.DEFAULT_PATH is False:
+            path = str(self.EVALUATION_MAX) + "_" + self.iteration + " igd " + str(np.around(self.performance[1], decimals=4)) + ".xlsx"
+        else:
+            path = self.config['path_save'] + self.name + \
+                   "/Total(" + str(self.n_vars) + "," + str(self.n_objs) + ")/" + \
+                   str(self.EVALUATION_MAX) + "_" + self.iteration + " igd " + str(np.around(self.performance[1], decimals=4)) + ".xlsx"
         self.recorder.save(path)
-        return self.ps, self.performance[0]
+        return self.ps, self.performance[1]
 

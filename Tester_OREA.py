@@ -4,8 +4,7 @@ import xlrd
 from time import time
 
 from problems.DTLZ.DTLZ import *
-#from OREA.OREA import *
-from OREA.OREA_DACE import *
+from OREA.OREA import *
 #from tools.data_IO import load_PF
 
 desired_width = 160
@@ -13,15 +12,15 @@ np.set_printoptions(linewidth=desired_width)
 np.set_printoptions(precision=4, suppress=True)
 
 
-""" Written by Xun-Zhao Yu (yuxunzhao@gmail.com). Last update: 2022-Mar-13.
+""" Written by Xun-Zhao Yu (yuxunzhao@gmail.com). Last update: 2022-June-15.
 OREA Tester for DTLZ benchmark functions.
 """
 cfg_filename = 'config_DTLZ.yml'
 with open(cfg_filename,'r') as ymlfile:
     config = yaml.load(ymlfile)
 
-name = 'DTLZ3'
-dataset = DTLZ3(config)
+name = 'DTLZ1'
+dataset = DTLZ1(config)
 
 # get the Pareto Front of DTLZ
 """
@@ -35,11 +34,11 @@ for index in range(n_rows):
     pf[index] = pf_data.row_values(index)
 #"""
 
-iteration_max = 30
+iteration_max = 1
 for iteration in range(0, iteration_max):
     time1 = time()
     current_iteration = str(iteration + 1).zfill(2)
-    alg = OREA(config, name, dataset, pf, init_path='results/')
+    alg = OREA(config, name, dataset, pf, b_default_path=True)
     alg.run(current_iteration)
     t = time() - time1
     print("run time: {:.0f} mins, {:.2f} secs.".format(t // 60, t % 60))

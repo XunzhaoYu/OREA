@@ -6,7 +6,6 @@ from .fit import fit
 pydacefit source: https://github.com/msu-coinlab/pydacefit
 """
 
-
 def start(theta, dace):
     t, lo, up = theta, dace.tl, dace.tu
 

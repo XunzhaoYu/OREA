@@ -12,6 +12,7 @@ Modifications made:
     Note: Ordinal regression is not stable as fitness regression, so we need a flexible fitting setup.
 3. function 'fit': self.theta = self.model['theta']
     Note: Update self.theta after training.
+    
 pydacefit source: https://github.com/msu-coinlab/pydacefit
 """
 
@@ -61,6 +62,9 @@ class DACE:
         # intermediate steps saved during hyperparameter optimization
         self.itpar = None
 
+    def set_theta(self, theta):
+        self.theta = theta
+
     def fit(self, X, Y, max_iter=4):
 
         # the targets should be a 2d array
@@ -73,6 +77,7 @@ class DACE:
 
         # save the mean and standard deviation of the input
         mX, sX = np.mean(X, axis=0), np.std(X, axis=0, ddof=1)
+        sX[sX == 0] += 2.220446049250313e-16
         mY, sY = np.mean(Y, axis=0), np.std(Y, axis=0, ddof=1)
 
         # standardize the input
@@ -109,7 +114,7 @@ class DACE:
         _R = calc_kernel_matrix(_nX, nX, corr, theta)
 
         # predict and destandardize
-        _sY = _F @ beta + (gamma.T @ _R.T).T
+        _sY = _F @ beta + (gamma.T @ _R.T).T  # F @ beta + r @ gamma
         _Y = (_sY * sY) + mY
 
         ret = [_Y]

@@ -25,19 +25,20 @@ def fit(X, Y, regr, kernel, theta):
     try:
         C = np.linalg.cholesky(R)
     except LinAlgError:
+        print(R)
         raise Exception("Error while doing Cholesky Decomposition.")
 
     # fit the least squares for regression
     F = regr(X)
-    Ft = np.linalg.lstsq(C, F, rcond=None)[0]
-    #Ft = np.linalg.solve(C, F)
+    #Ft = np.linalg.lstsq(C, F, rcond=None)[0]
+    Ft = np.linalg.solve(C, F)
     Q, G = np.linalg.qr(Ft)
     rcond = 1.0 / np.linalg.cond(G)
     if rcond > 1e15:
         raise Exception('F is too ill conditioned: Poor combination of regression model and design sites')
     Yt = np.linalg.solve(C, Y)
-    beta = np.linalg.lstsq(G, Q.T @ Yt, rcond=None)[0]
-    #beta = np.linalg.solve(G, Q.T @ Yt)
+    #beta = np.linalg.lstsq(G, Q.T @ Yt, rcond=None)[0]
+    beta = np.linalg.solve(G, Q.T @ Yt)
 
     # calculate the residual to fit with gaussian process and calculate objective function
     rho = Yt - Ft @ beta
@@ -60,14 +61,14 @@ def fit(X, Y, regr, kernel, theta):
         'R': R,
         'C': C,
         'F': F,
-        'Ft': Ft,
+        'Ft': Ft,  # C^-1 @ F
         'Q': Q,
         'G': G,
-        'Yt': Yt,
-        'beta': beta,
-        'rho': rho,
+        'Yt': Yt,  # C^-1 @ Y
+        'beta': beta,  # mu
+        'rho': rho,  # C^-1 @ (Y - one @ mu)
         '_sigma2': sigma2,
         'obj': obj,
         'f': obj,
-        'gamma': gamma
+        'gamma': gamma  # R^-1 @ (Y - one @ mu)
     }

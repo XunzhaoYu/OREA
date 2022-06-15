@@ -2,14 +2,18 @@
 import numpy as np
 from scipy import spatial
 from time import time
+from copy import deepcopy
 
-""" Written by Xun-Zhao Yu (yuxunzhao@gmail.com). Last update: 2022-Mar-15.
+""" Written by Xun-Zhao Yu (yuxunzhao@gmail.com). Last update: 2022-June-15.
 labeling by domination-based ordinal relations
 """
 
 
-def domination_based_ordinal_values(pf_index, archive_fitness, pf_upperbound, pf_lowerbound, n_levels, overfitting_coeff=0.03, b_print=False):
+def domination_based_ordinal_values(pf_index, archive_fitness, pf_upperbound, pf_lowerbound, n_levels=10, overfitting_coeff=0.03, b_print=False):
+    pf_index = deepcopy(pf_index)
+    archive_fitness = deepcopy(archive_fitness)
     start = time()
+
     archive_size, n_objs = np.shape(archive_fitness)
     label = np.zeros(archive_size)
     cut_row = None  # a variable will be used in the second branch below, if the program enter the first branch, then this variable will always be None.
@@ -21,6 +25,7 @@ def domination_based_ordinal_values(pf_index, archive_fitness, pf_upperbound, pf
         archive_fitness_0 = archive_fitness - pf_lowerbound
         nadir_upperbound = np.max(archive_fitness_0, axis=0)
         reference_point = np.array([nadir_upperbound/archive_size])
+        print(reference_point)
         if b_print:
             print("special case, only one point in current Pareto Front:", np.shape(reference_point))
     else:
@@ -77,13 +82,13 @@ def domination_based_ordinal_values(pf_index, archive_fitness, pf_upperbound, pf
     if b_print:
         print("the number of shaped reference points: {:d}".format(rp_count))
         
-    n_levels = max(int(np.ceil(1.0/rp_ratio)), n_levels)
-    coeff = np.zeros((n_levels))
+    current_n_levels = max(int(np.ceil(1.0/rp_ratio)), n_levels)
+    coeff = np.zeros((current_n_levels))
 
     value = 1.0  # 1.0 - pf_ratio
-    value_diff = value/(n_levels-1)
+    value_diff = value/(current_n_levels-1)
     ratio_bound = rp_ratio
-    ratio_diff = (1.0 - ratio_bound)/(n_levels-1)
+    ratio_diff = (1.0 - ratio_bound)/(current_n_levels-1)
 
     coeff_t = 1.0
     coeff[0] = coeff_t
@@ -102,7 +107,7 @@ def domination_based_ordinal_values(pf_index, archive_fitness, pf_upperbound, pf
     rp_coeff_order = np.argsort(rp_coeff)
  
     start_index = 0
-    for c in range(1, n_levels-1):
+    for c in range(1, current_n_levels-1):
         ratio = int(min((np.ceil((rp_ratio+c * ratio_diff) * archive_size))-rp_count, len(rp_coeff_order)-1))
         value -= value_diff
         labeling_indexes = rest_index[rp_coeff_order[start_index: ratio]]
@@ -114,9 +119,7 @@ def domination_based_ordinal_values(pf_index, archive_fitness, pf_upperbound, pf
     if b_print:
         print(label[-2:], "time for labeling operation: {:.5f}".format(time()-start))
 
-    #print("the number of ordinal levels %d." % n_levels)
-    #print("indexes of reference points for current pf: ", labeled_index_in_pf)
-    return label, n_levels, reference_point, labeled_index_in_pf
+    return label, current_n_levels, labeled_index_in_pf
 
 
 
